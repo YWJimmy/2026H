@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "adc.h"
+#include "dma.h"
 #include "i2c.h"
 #include "tim.h"
 #include "usart.h"
@@ -26,7 +27,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "bsp_debug_uart.h"
+#include "test_encoder.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -90,6 +92,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_ADC1_Init();
   MX_I2C1_Init();
   MX_I2C2_Init();
@@ -101,7 +104,10 @@ int main(void)
   MX_USART2_UART_Init();
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
-
+	if (!Test_Encoder_Init())
+	{
+			Error_Handler();
+	}
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -111,6 +117,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+		Test_Encoder_Update();
   }
   /* USER CODE END 3 */
 }
@@ -161,7 +168,15 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+    BSP_DebugUart_TxCpltCallback(huart);
+}
 
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    BSP_DebugUart_ErrorCallback(huart);
+}
 /* USER CODE END 4 */
 
 /**
