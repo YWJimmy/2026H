@@ -1,0 +1,48 @@
+# STM32CubeMX transient metadata
+.mxproject
+
+# Keil MDK-ARM build output
+MDK-ARM/Objects/
+MDK-ARM/Listings/
+MDK-ARM/*.axf
+MDK-ARM/*.bin
+MDK-ARM/*.hex
+MDK-ARM/*.map
+MDK-ARM/*.lst
+MDK-ARM/*.lnp
+MDK-ARM/*.crf
+MDK-ARM/*.d
+MDK-ARM/*.dep
+MDK-ARM/*.o
+MDK-ARM/*.obj
+MDK-ARM/*.lib
+MDK-ARM/*.elf
+MDK-ARM/*.htm
+MDK-ARM/*.html
+MDK-ARM/*.build_log.htm
+
+# Keil user- and machine-specific settings
+MDK-ARM/*.uvopt
+MDK-ARM/*.uvoptx
+MDK-ARM/*.uvguix.*
+MDK-ARM/*.uvgui.*
+MDK-ARM/*.uvmpw
+MDK-ARM/*.bak
+MDK-ARM/*.tmp
+
+# Debugger trace and runtime files
+MDK-ARM/*.ini
+MDK-ARM/*.log
+MDK-ARM/*.scvd
+MDK-ARM/*.trace
+
+# Editor and operating-system files
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Microsoft Office lock files
+~$*
