@@ -11,7 +11,7 @@ extern "C" {
 /**
  * @brief MG90S 舵机允许的逻辑脉宽下限，单位为 us。
  */
-#define BSP_SERVO_PULSE_MIN_US       ((uint16_t)1000U)
+#define BSP_SERVO_PULSE_MIN_US       ((uint16_t)500U)
 
 /**
  * @brief MG90S 舵机中位逻辑脉宽，单位为 us。
@@ -21,7 +21,7 @@ extern "C" {
 /**
  * @brief MG90S 舵机允许的逻辑脉宽上限，单位为 us。
  */
-#define BSP_SERVO_PULSE_MAX_US       ((uint16_t)2000U)
+#define BSP_SERVO_PULSE_MAX_US       ((uint16_t)2500U)
 
 /**
  * @brief 初始化舵机 BSP。
@@ -71,7 +71,7 @@ bool BSP_Servo_IsEnabled(void);
 /**
  * @brief 设置舵机逻辑脉宽，单位为 us。
  *
- * 输入值会被限制到 1000～2000 us。
+ * 输入值会被限制到 1500～2500 us。
  * BSP 未使能时只保存目标值，不产生 PWM；
  * BSP 已使能时立即更新 TIM1_CH1 的 CCR。
  *
@@ -89,7 +89,7 @@ bool BSP_Servo_SetPulseUs(uint16_t pulse_us);
  * - offset_us = -50  -> 1450 us
  * - offset_us = +50  -> 1550 us
  *
- * 超出 1000～2000 us 的结果会自动限幅。
+ * 超出 500～2500 us 的结果会自动限幅。
  *
  * @param offset_us 相对中位的偏移量，单位为 us。
  * @return true  已保存或写入。
