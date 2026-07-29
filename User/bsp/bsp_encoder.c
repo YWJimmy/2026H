@@ -12,7 +12,7 @@
  * 正方向统一定义为“车轮驱动小车向前时计数增加”。
  * 架空车轮测试后，哪一侧方向相反，就只修改对应宏。
  */
-#define BSP_ENCODER_LEFT_REVERSED     0U
+#define BSP_ENCODER_LEFT_REVERSED     1U
 #define BSP_ENCODER_RIGHT_REVERSED    0U
 
 /* TIM3、TIM4 当前均配置为 16 位满周期计数。 */
