@@ -6,34 +6,37 @@
 
 #include <stdint.h>
 
-#define TEST_SERVO_STEP_PERIOD_MS    2000U
+/*
+ * 舵机到达一个极限后保持的时间。
+ * 可按需要修改，单位为 ms。
+ */
+#define TEST_SERVO_LIMIT_HOLD_MS     2000U
 
-static const uint16_t s_test_pulses_us[] =
+typedef enum
 {
-    1500U,
-    1450U,
-    1500U,
-    1550U,
-    1500U
-};
-
-#define TEST_SERVO_STEP_COUNT \
-    ((uint8_t)(sizeof(s_test_pulses_us) / sizeof(s_test_pulses_us[0])))
+    TEST_SERVO_TARGET_MIN = 0,
+    TEST_SERVO_TARGET_MAX
+} TestServoTarget_t;
 
 static bool s_initialized = false;
-static uint8_t s_step_index = 0U;
-static uint32_t s_step_start_ms = 0U;
+static TestServoTarget_t s_target = TEST_SERVO_TARGET_MIN;
+static uint32_t s_last_switch_ms = 0U;
 
-static bool Test_Servo_ApplyStep(uint8_t step_index)
+static bool Test_Servo_ApplyTarget(TestServoTarget_t target)
 {
     uint16_t pulse_us;
+    const char *target_name;
 
-    if (step_index >= TEST_SERVO_STEP_COUNT)
+    if (target == TEST_SERVO_TARGET_MIN)
     {
-        return false;
+        pulse_us = BSP_SERVO_PULSE_MIN_US;
+        target_name = "MIN";
     }
-
-    pulse_us = s_test_pulses_us[step_index];
+    else
+    {
+        pulse_us = BSP_SERVO_PULSE_MAX_US;
+        target_name = "MAX";
+    }
 
     if (!BSP_Servo_SetPulseUs(pulse_us))
     {
@@ -41,8 +44,8 @@ static bool Test_Servo_ApplyStep(uint8_t step_index)
     }
 
     (void)BSP_Debug_Printf(
-        "SERVO,STEP=%u,PULSE_US=%u,EN=%u\r\n",
-        (unsigned int)step_index,
+        "SERVO,LIMIT=%s,PULSE_US=%u,EN=%u\r\n",
+        target_name,
         (unsigned int)BSP_Servo_GetPulseUs(),
         BSP_Servo_IsEnabled() ? 1U : 0U);
 
@@ -52,7 +55,7 @@ static bool Test_Servo_ApplyStep(uint8_t step_index)
 bool Test_Servo_Init(void)
 {
     s_initialized = false;
-    s_step_index = 0U;
+    s_target = TEST_SERVO_TARGET_MIN;
 
     if (!BSP_DebugUart_Init())
     {
@@ -65,9 +68,13 @@ bool Test_Servo_Init(void)
         return false;
     }
 
-    if (!BSP_Servo_SetPulseUs(BSP_SERVO_PULSE_CENTER_US))
+    /*
+     * 先保存最小极限，再启动 PWM。
+     * Enable() 后将立即输出 1000 us。
+     */
+    if (!BSP_Servo_SetPulseUs(BSP_SERVO_PULSE_MIN_US))
     {
-        (void)BSP_Debug_Printf("ERR,SERVO_SET_CENTER\r\n");
+        (void)BSP_Debug_Printf("ERR,SERVO_SET_MIN\r\n");
         return false;
     }
 
@@ -77,18 +84,17 @@ bool Test_Servo_Init(void)
         return false;
     }
 
-    s_step_start_ms = HAL_GetTick();
+    s_last_switch_ms = HAL_GetTick();
     s_initialized = true;
 
     (void)BSP_Debug_Printf(
-        "TEST,SERVO,START,MIN_US=%u,CENTER_US=%u,MAX_US=%u,"
-        "STEP_MS=%lu\r\n",
+        "TEST,SERVO,LIMIT_START,MIN_US=%u,MAX_US=%u,"
+        "HOLD_MS=%lu\r\n",
         (unsigned int)BSP_SERVO_PULSE_MIN_US,
-        (unsigned int)BSP_SERVO_PULSE_CENTER_US,
         (unsigned int)BSP_SERVO_PULSE_MAX_US,
-        (unsigned long)TEST_SERVO_STEP_PERIOD_MS);
+        (unsigned long)TEST_SERVO_LIMIT_HOLD_MS);
 
-    if (!Test_Servo_ApplyStep(s_step_index))
+    if (!Test_Servo_ApplyTarget(s_target))
     {
         Test_Servo_Stop();
         return false;
@@ -110,23 +116,29 @@ void Test_Servo_Update(void)
 
     now_ms = HAL_GetTick();
 
-    if ((uint32_t)(now_ms - s_step_start_ms) <
-        TEST_SERVO_STEP_PERIOD_MS)
+    if ((uint32_t)(now_ms - s_last_switch_ms) <
+        TEST_SERVO_LIMIT_HOLD_MS)
     {
         return;
     }
 
-    s_step_start_ms = now_ms;
-    s_step_index++;
+    /*
+     * 使用累加方式更新时间基准，减小主循环短暂延迟导致的长期漂移。
+     */
+    s_last_switch_ms += TEST_SERVO_LIMIT_HOLD_MS;
 
-    if (s_step_index >= TEST_SERVO_STEP_COUNT)
+    if (s_target == TEST_SERVO_TARGET_MIN)
     {
-        s_step_index = 0U;
+        s_target = TEST_SERVO_TARGET_MAX;
+    }
+    else
+    {
+        s_target = TEST_SERVO_TARGET_MIN;
     }
 
-    if (!Test_Servo_ApplyStep(s_step_index))
+    if (!Test_Servo_ApplyTarget(s_target))
     {
-        (void)BSP_Debug_Printf("ERR,SERVO_STEP\r\n");
+        (void)BSP_Debug_Printf("ERR,SERVO_LIMIT_SWITCH\r\n");
         Test_Servo_Stop();
     }
 }

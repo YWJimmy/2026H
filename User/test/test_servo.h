@@ -8,24 +8,21 @@ extern "C" {
 #include <stdbool.h>
 
 /**
- * @brief 初始化 MG90S 舵机安全范围测试和调试串口。
+ * @brief 初始化舵机两极限往返测试。
  *
  * 调用前必须完成：
  * - MX_DMA_Init()
  * - MX_USART1_UART_Init()
  * - MX_TIM1_Init()
  *
- * 测试会启用舵机 PWM，并从 1500 us 中位开始。
+ * 测试使用 BSP 中定义的 1000 us 和 2000 us 两个极限。
  */
 bool Test_Servo_Init(void);
 
 /**
- * @brief 非阻塞更新舵机测试。
+ * @brief 非阻塞更新舵机两极限往返测试。
  *
  * 主循环中持续调用。
- * 默认每 2 秒依次输出：
- * 1500 -> 1450 -> 1500 -> 1550 -> 1500 us，
- * 然后循环执行。
  */
 void Test_Servo_Update(void);
 
@@ -35,7 +32,7 @@ void Test_Servo_Update(void);
 void Test_Servo_Stop(void);
 
 /**
- * @brief 查询舵机测试是否已经初始化成功。
+ * @brief 查询测试是否已经初始化成功。
  */
 bool Test_Servo_IsInitialized(void);
 
