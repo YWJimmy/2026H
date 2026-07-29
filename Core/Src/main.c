@@ -28,7 +28,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "bsp_debug_uart.h"
-#include "test_encoder.h"
+#include "test_servo.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -104,7 +104,7 @@ int main(void)
   MX_USART2_UART_Init();
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
-	if (!Test_Encoder_Init())
+	if (!Test_Servo_Init())
 	{
 			Error_Handler();
 	}
@@ -117,7 +117,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-		Test_Encoder_Update();
+		Test_Servo_Update();
   }
   /* USER CODE END 3 */
 }

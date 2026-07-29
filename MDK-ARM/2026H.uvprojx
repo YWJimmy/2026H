@@ -408,6 +408,11 @@
               <FileType>1</FileType>
               <FilePath>..\User\bsp\bsp_debug_uart.c</FilePath>
             </File>
+            <File>
+              <FileName>bsp_servo.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\bsp\bsp_servo.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -417,6 +422,11 @@
               <FileName>test_encoder.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\test\test_encoder.c</FilePath>
+            </File>
+            <File>
+              <FileName>test_servo.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\test\test_servo.c</FilePath>
             </File>
           </Files>
         </Group>
