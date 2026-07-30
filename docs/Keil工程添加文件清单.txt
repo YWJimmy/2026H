@@ -1,0 +1,18 @@
+Include Paths 增加：
+../User/module
+
+User/bsp 分组增加：
+..\User\bsp\bsp_line_adc.c
+
+新建 User/module 分组并增加：
+..\User\module\line_sensor.c
+..\User\module\line_follow.c
+
+User/test 分组增加：
+..\User\test\test_runner.c
+..\User\test\test_line_adc.c
+..\User\test\test_line_sensor.c
+..\User\test\test_line_follow.c
+
+替换：
+Core\Src\main.c

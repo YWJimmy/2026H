@@ -1,0 +1,122 @@
+# 2026H 八路巡线 V1
+
+## 文件结构
+
+```text
+User/
+├─ bsp/
+│  ├─ bsp_line_adc.c
+│  └─ bsp_line_adc.h
+├─ module/
+│  ├─ line_sensor_config.h
+│  ├─ line_sensor.c
+│  ├─ line_sensor.h
+│  ├─ line_follow.c
+│  └─ line_follow.h
+└─ test/
+   ├─ test_config.h
+   ├─ test_runner.c
+   ├─ test_runner.h
+   ├─ test_line_adc.c/.h
+   ├─ test_line_sensor.c/.h
+   └─ test_line_follow.c/.h
+```
+
+## 已实现
+
+- TIM2 1 kHz 触发 ADC1 八路扫描。
+- ADC1 DMA2 Stream0 循环搬运。
+- LINE_EN 高电平有效，启动后 5 ms 才认为数据有效。
+- BSP 输出物理顺序：PB0、PB1、PC0、PC1、PC2、PC3、PC4、PC5。
+- Module 统一逻辑顺序：0 最左，7 最右。
+- `black_mask` 中 1 表示黑。
+- `strength[8]` 使用 0～1000 整数黑度。
+- 黑白判断带 600/400 迟滞。
+- 初版巡线位置范围为 -7000～+7000。
+
+## Keil 工程修改
+
+在 Include Paths 增加：
+
+```text
+../User/module
+```
+
+加入源文件：
+
+```text
+User/bsp/bsp_line_adc.c
+User/module/line_sensor.c
+User/module/line_follow.c
+User/test/test_runner.c
+User/test/test_line_adc.c
+User/test/test_line_sensor.c
+User/test/test_line_follow.c
+```
+
+可直接使用压缩包内 `Core/Src/main.c` 替换当前文件。
+
+## 选择测试
+
+编辑：
+
+```text
+User/test/test_config.h
+```
+
+可选：
+
+```c
+#define PROJECT_TEST_MODE TEST_MODE_LINE_ADC
+#define PROJECT_TEST_MODE TEST_MODE_LINE_SENSOR
+#define PROJECT_TEST_MODE TEST_MODE_LINE_FOLLOW
+```
+
+默认使用 `TEST_MODE_LINE_SENSOR`。
+
+## 第一次测试顺序
+
+1. 先选择 `TEST_MODE_LINE_ADC`，分别把白底和黑线放到各探头下，记录八路 RAW。
+2. 将每一路白色、黑色原始值写入 `line_sensor_config.h`。
+3. 选择 `TEST_MODE_LINE_SENSOR`，检查 `MASK`、`RAW`、`STR` 和左右顺序。
+4. 选择 `TEST_MODE_LINE_FOLLOW`，检查 `POS`：左侧应为负，右侧应为正。
+
+## 标定配置
+
+当前默认值只是按约 2.2 V 白色、3.2 V 黑色换算出的初始估计：
+
+```c
+#define LINE_SENSOR_WHITE_RAW_INIT {2700U, ...}
+#define LINE_SENSOR_BLACK_RAW_INIT {3970U, ...}
+```
+
+必须用实际串口数据逐路替换。
+
+若模块装反，只修改：
+
+```c
+#define LINE_SENSOR_CHANNEL_MAP_INIT \
+{7U, 6U, 5U, 4U, 3U, 2U, 1U, 0U}
+```
+
+## 串口示例
+
+原始 ADC：
+
+```text
+ADC8,SEQ=102,ERR=0,RAW=2710,2705,2718,3980,3960,2722,2711,2708
+```
+
+统一数据：
+
+```text
+LINE,SEQ=205,MASK=0x18,VALID=0xFF
+LINE,RAW=2710,2705,2718,3980,3960,2722,2711,2708
+LINE,STR=8,4,14,1000,992,17,9,6
+```
+
+巡线分析：
+
+```text
+FOLLOW,SEQ=306,MASK=0x18,STATE=NORMAL,POS=0,ERR=0,BLACK=2,SUM=1992
+```
