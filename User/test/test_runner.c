@@ -33,6 +33,9 @@
 #elif PROJECT_TEST_MODE == TEST_MODE_LINE_FOLLOW_DRIVE
 #include "test_line_follow_drive.h"
 
+#elif PROJECT_TEST_MODE == TEST_MODE_BALL_BALANCE
+#include "test_ball_balance.h"
+
 #else
 #error "Unsupported PROJECT_TEST_MODE"
 #endif
@@ -41,25 +44,38 @@ bool TestRunner_Init(void)
 {
 #if PROJECT_TEST_MODE == TEST_MODE_LINE_ADC
     return Test_LineAdc_Init();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_LINE_SENSOR
     return Test_LineSensor_Init();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_LINE_FOLLOW
     return Test_LineFollow_Init();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_MOTOR_OPEN_LOOP
     return Test_MotorOpenLoop_Init();
+
 #elif ((PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_MMPS) || \
        (PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_CPS))
     return Test_WheelSpeed_Init();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_CHASSIS_STRAIGHT
     return Test_ChassisStraight_Init();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_ENCODER
     return Test_Encoder_Init();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_LINE_UART
     return Test_LineUart_Init();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_VISION_UART
     return Test_VisionUart_Init();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_LINE_FOLLOW_DRIVE
     return Test_LineFollowDrive_Init();
+
+#elif PROJECT_TEST_MODE == TEST_MODE_BALL_BALANCE
+    return Test_BallBalance_Init();
+
 #else
     return false;
 #endif
@@ -69,25 +85,37 @@ void TestRunner_Update(void)
 {
 #if PROJECT_TEST_MODE == TEST_MODE_LINE_ADC
     Test_LineAdc_Update();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_LINE_SENSOR
     Test_LineSensor_Update();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_LINE_FOLLOW
     Test_LineFollow_Update();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_MOTOR_OPEN_LOOP
     Test_MotorOpenLoop_Update();
+
 #elif ((PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_MMPS) || \
        (PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_CPS))
     Test_WheelSpeed_Update();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_CHASSIS_STRAIGHT
     Test_ChassisStraight_Update();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_ENCODER
     Test_Encoder_Update();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_LINE_UART
     Test_LineUart_Update();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_VISION_UART
     Test_VisionUart_Update();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_LINE_FOLLOW_DRIVE
     Test_LineFollowDrive_Update();
+
+#elif PROJECT_TEST_MODE == TEST_MODE_BALL_BALANCE
+    Test_BallBalance_Update();
 #endif
 }
 
@@ -95,24 +123,36 @@ void TestRunner_Stop(void)
 {
 #if PROJECT_TEST_MODE == TEST_MODE_LINE_ADC
     Test_LineAdc_Stop();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_LINE_SENSOR
     Test_LineSensor_Stop();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_LINE_FOLLOW
     Test_LineFollow_Stop();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_MOTOR_OPEN_LOOP
     Test_MotorOpenLoop_Stop();
+
 #elif ((PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_MMPS) || \
        (PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_CPS))
     Test_WheelSpeed_Stop();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_CHASSIS_STRAIGHT
     Test_ChassisStraight_Stop();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_ENCODER
     /* 编码器测试不驱动输出，无需主动停止。 */
+
 #elif PROJECT_TEST_MODE == TEST_MODE_LINE_UART
     Test_LineUart_Stop();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_VISION_UART
     Test_VisionUart_Stop();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_LINE_FOLLOW_DRIVE
     Test_LineFollowDrive_Stop();
+
+#elif PROJECT_TEST_MODE == TEST_MODE_BALL_BALANCE
+    Test_BallBalance_Stop();
 #endif
 }

@@ -19,13 +19,17 @@
 #define TEST_MODE_LINE_FOLLOW_DRIVE         11U
 
 /*
- * 实际巡线驾驶测试：
- * - 上电后电机保持不动；
- * - 第一次按PG15开始巡线；
- * - 第二次按PG15立即短路刹车停止；
- * - INVALID、丢线超时、全黑超时会自动停止；
- * - 自动停止后再次按PG15可重新开始。
+ * 从main恢复的钢球平衡独立测试。
+ * 使用20，避免与follow已有模式1～11冲突。
  */
+#define TEST_MODE_BALL_BALANCE              20U
+
+/*
+ * 默认仍保持实际巡线驾驶模式，不改变底盘测试入口。
+ * 编译钢球测试时改为TEST_MODE_BALL_BALANCE。
+ */
+#ifndef PROJECT_TEST_MODE
 #define PROJECT_TEST_MODE                   TEST_MODE_LINE_FOLLOW_DRIVE
+#endif
 
 #endif /* TEST_CONFIG_H */

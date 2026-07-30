@@ -493,7 +493,12 @@
               <FileType>1</FileType>
               <FilePath>..\User\test\test_line_follow_drive.c</FilePath>
             </File>
-          </Files>
+                      <File>
+              <FileName>test_ball_balance.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\test\test_ball_balance.c</FilePath>
+            </File>
+</Files>
         </Group>
         <Group>
           <GroupName>Application/User/Core</GroupName>
