@@ -22,24 +22,35 @@
 #define SERVO_MAX_US            1800U
 
 /*
- * PI-controller gains.
- *   delta_us = Kp * error + Ki * integral
+ * P-gain: push strength when ball is not braking.
  */
-#define BALL_KP                 1.0f
-#define BALL_KI                 0.005f
+#define BALL_PUSH_KP            1.0f
 
 /*
- * Integral anti-windup: clamp integral to +/- this value.
+ * Braking: start braking when distance < |speed| * BRAKE_GAIN.
+ * Higher = brake earlier.
  */
-#define BALL_INTEGRAL_MAX       4000.0f
+#define BALL_BRAKE_GAIN         3.0f
 
 /*
- * Dead zone: |error| <= 30 → ball within 470..530, hold position.
+ * Base brake pulse offset from center (us).
+ * Actual brake = BASE + |speed| * SPEED_FACTOR.
+ */
+#define BALL_BRAKE_BASE_US      200U
+#define BALL_BRAKE_SPEED_FACTOR 1.5f
+
+/*
+ * Maximum brake pulse offset (us).
+ */
+#define BALL_BRAKE_MAX_US       120U
+
+/*
+ * Dead zone: |error| <= 30 → ball within 470..530, hold level.
  */
 #define BALL_DEADZONE_PX        30
 
 /*
- * Minimum step size (us) on total delta.
+ * Minimum push step size (us).
  */
 #define BALL_MIN_STEP_US        20U
 
@@ -63,9 +74,11 @@ static uint32_t s_last_heartbeat_ms  = 0U;
 static uint32_t s_lost_frames        = 0U;
 static int32_t  s_last_cx            = 0;
 static int32_t  s_last_error         = 0;
-static int32_t  s_prev_error         = 0;
-static float    s_integral           = 0.0f;
+static int32_t  s_prev_cx            = 0;
+static int32_t  s_speed              = 0;
+static int32_t  s_last_delta         = 0;
 static bool     s_has_target         = false;
+static bool     s_braking            = false;
 
 static uint16_t Servo_ClampPulse(int32_t raw)
 {
@@ -82,8 +95,10 @@ bool Test_BallBalance_Init(void)
     s_last_print_ms     = 0U;
     s_last_heartbeat_ms = 0U;
     s_lost_frames       = 0U;
-    s_integral          = 0.0f;
-    s_prev_error        = 0;
+    s_prev_cx           = 0;
+    s_speed             = 0;
+    s_last_delta        = 0;
+    s_braking           = false;
 
     if (!BSP_DebugUart_Init())
     {
@@ -91,16 +106,16 @@ bool Test_BallBalance_Init(void)
     }
 
     (void)BSP_Debug_Printf(
-        "BALL_BAL,START,TARGET_CX=%d,"
-        "SERVO_CENTER=%u,SERVO_MIN=%u,SERVO_MAX=%u,"
-        "KP=%.2f,KI=%.3f,DEADZONE=%d\r\n",
+        "BALL_BAL,START,MODE=BRAKE,"
+        "TARGET_CX=%d,DEADZONE=%d,"
+        "PUSH_KP=%.2f,BRAKE_GAIN=%.1f,"
+        "BRAKE_BASE=%u,BRAKE_MAX=%u\r\n",
         BALL_TARGET_CX,
-        (unsigned int)SERVO_CENTER_US,
-        (unsigned int)SERVO_MIN_US,
-        (unsigned int)SERVO_MAX_US,
-        (double)BALL_KP,
-        (double)BALL_KI,
-        BALL_DEADZONE_PX);
+        BALL_DEADZONE_PX,
+        (double)BALL_PUSH_KP,
+        (double)BALL_BRAKE_GAIN,
+        (unsigned int)BALL_BRAKE_BASE_US,
+        (unsigned int)BALL_BRAKE_MAX_US);
 
     /* Init servo at center position before enabling */
     if (!BSP_Servo_Init())
@@ -172,31 +187,82 @@ void Test_BallBalance_Update(void)
             s_has_target = true;
             s_lost_frames = 0U;
 
-            if (abs(s_last_error) > BALL_DEADZONE_PX)
+            /* Speed: positive = moving right, negative = moving left */
+            if (s_prev_cx != 0)
+            {
+                s_speed = s_last_cx - s_prev_cx;
+            }
+            s_prev_cx = s_last_cx;
+
+            if (abs(s_last_error) <= BALL_DEADZONE_PX)
+            {
+                /* In dead zone: hold level */
+                s_braking = false;
+                if ((uint16_t)s_servo_pulse != SERVO_CENTER_US)
+                {
+                    (void)BSP_Servo_SetPulseUs(SERVO_CENTER_US);
+                    s_servo_pulse = (float)SERVO_CENTER_US;
+                }
+            }
+            else
             {
                 int32_t delta;
+                bool moving_to_target;
 
-                /* Reset integral on error sign change (crossed target) */
-                if ((s_last_error > 0 && s_prev_error < 0) ||
-                    (s_last_error < 0 && s_prev_error > 0))
-                {
-                    s_integral = 0.0f;
-                }
+                /*
+                 * Is ball moving toward target?
+                 * Ball left of target (error>0) + moving right (speed>0) → YES
+                 * Ball right of target (error<0) + moving left (speed<0) → YES
+                 */
+                moving_to_target =
+                    (s_last_error > 0 && s_speed > 0) ||
+                    (s_last_error < 0 && s_speed < 0);
 
-                /* Accumulate integral with anti-windup */
-                s_integral += (float)s_last_error;
-                if (s_integral > BALL_INTEGRAL_MAX)
+                if (moving_to_target)
                 {
-                    s_integral = BALL_INTEGRAL_MAX;
-                }
-                else if (s_integral < -BALL_INTEGRAL_MAX)
-                {
-                    s_integral = -BALL_INTEGRAL_MAX;
-                }
+                    /* Brake distance = how far ahead to start braking */
+                    int32_t brake_dist =
+                        (int32_t)((float)abs(s_speed) * BALL_BRAKE_GAIN);
 
-                delta = (int32_t)(
-                    BALL_KP * (float)s_last_error +
-                    BALL_KI * s_integral);
+                    if ((int32_t)abs(s_last_error) < brake_dist)
+                    {
+                        /* BRAKING: reverse tilt to slow ball down */
+                        int32_t brake = (int32_t)BALL_BRAKE_BASE_US +
+                            (int32_t)((float)abs(s_speed) * BALL_BRAKE_SPEED_FACTOR);
+
+                        if (brake > (int32_t)BALL_BRAKE_MAX_US)
+                        {
+                            brake = (int32_t)BALL_BRAKE_MAX_US;
+                        }
+
+                        /*
+                         * Ball moving right (speed>0): brake by tilting LEFT
+                         * Ball moving left (speed<0): brake by tilting RIGHT
+                         */
+                        if (s_speed > 0)
+                        {
+                            delta = -(int32_t)brake;
+                        }
+                        else
+                        {
+                            delta = (int32_t)brake;
+                        }
+
+                        s_braking = true;
+                    }
+                    else
+                    {
+                        /* Moving toward target but far away: keep pushing */
+                        delta = (int32_t)(BALL_PUSH_KP * (float)s_last_error);
+                        s_braking = false;
+                    }
+                }
+                else
+                {
+                    /* Ball stopped or moving away: push toward target */
+                    delta = (int32_t)(BALL_PUSH_KP * (float)s_last_error);
+                    s_braking = false;
+                }
 
                 /* Minimum step */
                 if ((delta > 0) && (delta < (int32_t)BALL_MIN_STEP_US))
@@ -208,8 +274,9 @@ void Test_BallBalance_Update(void)
                     delta = -(int32_t)BALL_MIN_STEP_US;
                 }
 
-                raw_pulse = (int32_t)SERVO_CENTER_US + delta;
-                clamped_pulse = Servo_ClampPulse(raw_pulse);
+                s_last_delta   = delta;
+                raw_pulse      = (int32_t)SERVO_CENTER_US + delta;
+                clamped_pulse  = Servo_ClampPulse(raw_pulse);
 
                 if (clamped_pulse != (uint16_t)s_servo_pulse)
                 {
@@ -218,14 +285,6 @@ void Test_BallBalance_Update(void)
                         s_servo_pulse = (float)clamped_pulse;
                     }
                 }
-
-                s_prev_error = s_last_error;
-            }
-            else
-            {
-                /* In dead zone: stop accumulating, hold position */
-                s_integral   = 0.0f;
-                s_prev_error = 0;
             }
         }
         else
@@ -269,10 +328,11 @@ void Test_BallBalance_Update(void)
         if (s_has_target)
         {
             (void)BSP_Debug_Printf(
-                "BALL_BAL,CX=%ld,ERROR=%ld,INT=%ld,PULSE=%u\r\n",
+                "BALL_BAL,CX=%ld,ERR=%ld,SPD=%ld,%s,PULSE=%u\r\n",
                 (long)s_last_cx,
                 (long)s_last_error,
-                (long)s_integral,
+                (long)s_speed,
+                s_braking ? "BRAKE" : "PUSH",
                 (unsigned int)s_servo_pulse);
         }
         else
