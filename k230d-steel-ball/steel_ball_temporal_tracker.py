@@ -23,8 +23,11 @@ MIN_BOX_SIZE = 20
 MAX_BOX_SIZE = 160
 MIN_ASPECT_RATIO = 0.35
 MAX_ASPECT_RATIO = 2.80
-PIPE_CENTER_Y_MIN = 100
-PIPE_CENTER_Y_MAX = 860
+PIPE_ROI_X_MIN = 0
+PIPE_ROI_X_MAX = 1279
+PIPE_CENTER_SLOPE = 0.0
+PIPE_CENTER_INTERCEPT = 479.0
+PIPE_ROI_HALF_HEIGHT = 100.0
 
 
 def _center(box):
@@ -44,8 +47,12 @@ def _valid_geometry(detection):
     aspect_ratio = width / float(height)
     if aspect_ratio < MIN_ASPECT_RATIO or aspect_ratio > MAX_ASPECT_RATIO:
         return False
+    center_x = (x1 + x2) / 2.0
     center_y = (y1 + y2) / 2.0
-    return PIPE_CENTER_Y_MIN <= center_y <= PIPE_CENTER_Y_MAX
+    if center_x < PIPE_ROI_X_MIN or center_x > PIPE_ROI_X_MAX:
+        return False
+    pipe_center_y = PIPE_CENTER_INTERCEPT + PIPE_CENTER_SLOPE * center_x
+    return abs(center_y - pipe_center_y) <= PIPE_ROI_HALF_HEIGHT
 
 
 def _shift_box(box, delta_x, delta_y, score=None):
