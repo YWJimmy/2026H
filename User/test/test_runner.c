@@ -14,7 +14,8 @@
 #elif PROJECT_TEST_MODE == TEST_MODE_MOTOR_OPEN_LOOP
 #include "test_motor_open_loop.h"
 
-#elif PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED
+#elif ((PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_MMPS) || \
+       (PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_CPS))
 #include "test_wheel_speed.h"
 
 #elif PROJECT_TEST_MODE == TEST_MODE_CHASSIS_STRAIGHT
@@ -26,7 +27,6 @@
 #else
 #error "Unsupported PROJECT_TEST_MODE"
 #endif
-
 
 bool TestRunner_Init(void)
 {
@@ -46,7 +46,8 @@ bool TestRunner_Init(void)
 
     return Test_MotorOpenLoop_Init();
 
-#elif PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED
+#elif ((PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_MMPS) || \
+       (PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_CPS))
 
     return Test_WheelSpeed_Init();
 
@@ -64,7 +65,6 @@ bool TestRunner_Init(void)
 
 #endif
 }
-
 
 void TestRunner_Update(void)
 {
@@ -84,7 +84,8 @@ void TestRunner_Update(void)
 
     Test_MotorOpenLoop_Update();
 
-#elif PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED
+#elif ((PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_MMPS) || \
+       (PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_CPS))
 
     Test_WheelSpeed_Update();
 
@@ -98,7 +99,6 @@ void TestRunner_Update(void)
 
 #endif
 }
-
 
 void TestRunner_Stop(void)
 {
@@ -118,7 +118,8 @@ void TestRunner_Stop(void)
 
     Test_MotorOpenLoop_Stop();
 
-#elif PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED
+#elif ((PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_MMPS) || \
+       (PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_CPS))
 
     Test_WheelSpeed_Stop();
 
@@ -129,8 +130,7 @@ void TestRunner_Stop(void)
 #elif PROJECT_TEST_MODE == TEST_MODE_ENCODER
 
     /*
-     * 当前编码器测试没有需要主动停止的输出。
-     * 不驱动电机，仅保持编码器计数运行。
+     * 编码器测试不驱动电机，没有主动停止动作。
      */
 
 #endif

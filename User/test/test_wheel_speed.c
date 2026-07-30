@@ -3,13 +3,16 @@
 #include "bsp_debug_uart.h"
 #include "chassis.h"
 #include "stm32f4xx_hal.h"
+#include "test_config.h"
 
 #include <stdint.h>
 
 #define TEST_WHEEL_SPEED_STEP_HOLD_MS    3000U
 #define TEST_WHEEL_SPEED_PRINT_MS        100U
 
-static const int32_t s_speed_steps_mm_s[] =
+#if PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_MMPS
+
+static const int32_t s_speed_steps[] =
 {
     0,
     200,
@@ -20,9 +23,29 @@ static const int32_t s_speed_steps_mm_s[] =
     0
 };
 
+#define TEST_WHEEL_SPEED_UNIT_NAME       "MMPS"
+
+#elif PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_CPS
+
+static const int32_t s_speed_steps[] =
+{
+    0,
+    1500,
+    3000,
+    4500,
+    3000,
+    1500,
+    0
+};
+
+#define TEST_WHEEL_SPEED_UNIT_NAME       "CPS"
+
+#else
+#error "test_wheel_speed.c requires a wheel speed test mode"
+#endif
+
 #define TEST_WHEEL_SPEED_STEP_COUNT \
-    ((uint8_t)(sizeof(s_speed_steps_mm_s) / \
-               sizeof(s_speed_steps_mm_s[0])))
+    ((uint8_t)(sizeof(s_speed_steps) / sizeof(s_speed_steps[0])))
 
 static bool s_initialized = false;
 static bool s_finished = false;
@@ -30,16 +53,30 @@ static uint8_t s_step_index = 0U;
 static uint32_t s_step_start_ms = 0U;
 static uint32_t s_last_print_ms = 0U;
 
+static bool Test_WheelSpeed_SetTarget(int32_t target)
+{
+#if PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_MMPS
+
+    return Chassis_SetWheelSpeedMmps(target, target);
+
+#else
+
+    return Chassis_SetWheelSpeedCps(target, target);
+
+#endif
+}
+
 static void Test_WheelSpeed_ApplyStep(void)
 {
-    int32_t speed_mm_s = s_speed_steps_mm_s[s_step_index];
+    int32_t target = s_speed_steps[s_step_index];
 
-    (void)Chassis_SetWheelSpeedMmps(speed_mm_s, speed_mm_s);
+    (void)Test_WheelSpeed_SetTarget(target);
 
     (void)BSP_Debug_Printf(
-        "WSPD,STEP=%u,TARGET_MM_S=%ld\r\n",
+        "WSPD,STEP=%u,UNIT=%s,TARGET=%ld\r\n",
         (unsigned int)s_step_index,
-        (long)speed_mm_s);
+        TEST_WHEEL_SPEED_UNIT_NAME,
+        (long)target);
 }
 
 bool Test_WheelSpeed_Init(void)
@@ -70,7 +107,9 @@ bool Test_WheelSpeed_Init(void)
     s_initialized = true;
 
     (void)BSP_Debug_Printf(
-        "TEST,WHEEL_SPEED,START,HOLD_MS=%lu,PRINT_MS=%lu\r\n",
+        "TEST,WHEEL_SPEED,START,UNIT=%s,"
+        "HOLD_MS=%lu,PRINT_MS=%lu,NOTICE=LIFT_WHEELS\r\n",
+        TEST_WHEEL_SPEED_UNIT_NAME,
         (unsigned long)TEST_WHEEL_SPEED_STEP_HOLD_MS,
         (unsigned long)TEST_WHEEL_SPEED_PRINT_MS);
 
@@ -102,8 +141,13 @@ void Test_WheelSpeed_Update(void)
         {
             (void)BSP_Debug_Printf(
                 "WSPD,SEQ=%lu,DT=%u,"
-                "LTG=%ld,RTG=%ld,"
-                "LM=%ld,RM=%ld,"
+                "LTG_MM=%ld,RTG_MM=%ld,"
+                "LM_MM=%ld,RM_MM=%ld,"
+                "LTG_CPS=%ld,RTG_CPS=%ld,"
+                "LM_CPS=%ld,RM_CPS=%ld,"
+                "LRAW=%ld,RRAW=%ld,"
+                "LE=%ld,RE=%ld,"
+                "LI=%ld,RI=%ld,"
                 "LP=%d,RP=%d,"
                 "LD=%d,RD=%d,OVR=%lu\r\n",
                 (unsigned long)status.control_sequence,
@@ -112,6 +156,16 @@ void Test_WheelSpeed_Update(void)
                 (long)status.right_target_mm_s,
                 (long)status.left_measured_mm_s,
                 (long)status.right_measured_mm_s,
+                (long)status.left_target_cps,
+                (long)status.right_target_cps,
+                (long)status.left_measured_cps,
+                (long)status.right_measured_cps,
+                (long)status.left_raw_measured_cps,
+                (long)status.right_raw_measured_cps,
+                (long)status.left_error_cps,
+                (long)status.right_error_cps,
+                (long)status.left_integral_pwm,
+                (long)status.right_integral_pwm,
                 (int)status.left_pwm,
                 (int)status.right_pwm,
                 (int)status.left_delta,

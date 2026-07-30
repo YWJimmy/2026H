@@ -15,22 +15,25 @@ typedef struct
 
     int32_t left_target_mm_s;
     int32_t right_target_mm_s;
-
     int32_t left_measured_mm_s;
     int32_t right_measured_mm_s;
 
     int32_t left_target_cps;
     int32_t right_target_cps;
-
+    int32_t left_raw_measured_cps;
+    int32_t right_raw_measured_cps;
     int32_t left_measured_cps;
     int32_t right_measured_cps;
+    int32_t left_error_cps;
+    int32_t right_error_cps;
 
+    int32_t left_integral_pwm;
+    int32_t right_integral_pwm;
     int16_t left_pwm;
     int16_t right_pwm;
 
     int16_t left_delta;
     int16_t right_delta;
-
     int32_t left_total;
     int32_t right_total;
 
@@ -59,10 +62,28 @@ bool Chassis_IsInitialized(void);
 bool Chassis_IsEnabled(void);
 
 /**
+ * @brief 将mm/s转换为编码器count/s，不使用浮点数。
+ */
+int32_t Chassis_MmpsToCps(int32_t speed_mm_s);
+
+/**
+ * @brief 将编码器count/s转换为mm/s，不使用浮点数。
+ */
+int32_t Chassis_CpsToMmps(int32_t speed_cps);
+
+/**
  * @brief 直接设置左右轮目标速度，单位mm/s。
  */
 bool Chassis_SetWheelSpeedMmps(int32_t left_mm_s,
                                int32_t right_mm_s);
+
+/**
+ * @brief 直接设置左右轮目标速度，单位count/s。
+ *
+ * PI内部统一使用count/s；本接口绕过机械单位换算。
+ */
+bool Chassis_SetWheelSpeedCps(int32_t left_cps,
+                              int32_t right_cps);
 
 /**
  * @brief 设置底盘线速度和角速度。
@@ -74,6 +95,16 @@ bool Chassis_SetVelocity(int32_t linear_mm_s,
                          int32_t angular_mrad_s);
 
 /**
+ * @brief 运行时更新左右轮Q10 PI参数。
+ *
+ * 更新后左右积分和PWM输出清零。
+ */
+bool Chassis_SetWheelPiGainsQ10(int32_t left_kp_q10,
+                                int32_t left_ki_q10,
+                                int32_t right_kp_q10,
+                                int32_t right_ki_q10);
+
+/**
  * @brief 目标清零、清积分并立即短路刹车。
  */
 void Chassis_Stop(void);
@@ -81,7 +112,7 @@ void Chassis_Stop(void);
 /**
  * @brief 非阻塞更新底盘闭环。
  *
- * 主循环中持续调用。标称每5 ms执行一次控制。
+ * 主循环中持续调用，标称每5 ms执行一次控制。
  *
  * @return true 本次执行了一个控制周期。
  * @return false 尚未到周期、未使能或发生严重超时。
