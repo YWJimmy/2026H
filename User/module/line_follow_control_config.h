@@ -45,7 +45,7 @@
 #define LINE_FOLLOW_CONTROL_ALL_BLACK_TIMEOUT_MS     ((uint32_t)200U)
 
 /*
- * 测试启动键PG15为低电平按下，使用30 ms非阻塞消抖。
+ * 测试启动键使用KEY0：PE4，低电平按下，使用30 ms非阻塞消抖。
  */
 #define LINE_FOLLOW_DRIVE_KEY_DEBOUNCE_MS            ((uint32_t)30U)
 

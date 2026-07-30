@@ -61,6 +61,8 @@ void Error_Handler(void);
 #define IR_EN_GPIO_Port GPIOE
 #define MOTOR_STBY_Pin GPIO_PIN_3
 #define MOTOR_STBY_GPIO_Port GPIOE
+#define KEY0_Pin GPIO_PIN_4
+#define KEY0_GPIO_Port GPIOE
 #define MOTOR_L_PWM_Pin GPIO_PIN_5
 #define MOTOR_L_PWM_GPIO_Port GPIOE
 #define MOTOR_R_PWM_Pin GPIO_PIN_6
@@ -73,6 +75,8 @@ void Error_Handler(void);
 #define LINE_ADC5_GPIO_Port GPIOC
 #define LINE_ADC6_Pin GPIO_PIN_3
 #define LINE_ADC6_GPIO_Port GPIOC
+#define KEY_UP_Pin GPIO_PIN_0
+#define KEY_UP_GPIO_Port GPIOA
 #define BT_TX_Pin GPIO_PIN_2
 #define BT_TX_GPIO_Port GPIOA
 #define BT_RX_Pin GPIO_PIN_3
@@ -119,9 +123,6 @@ void Error_Handler(void);
 #define MOTOR_R_IN2_GPIO_Port GPIOG
 #define VISION_TX_Pin GPIO_PIN_14
 #define VISION_TX_GPIO_Port GPIOG
-#define START_KEY_Pin GPIO_PIN_15
-#define START_KEY_GPIO_Port GPIOG
-#define START_KEY_EXTI_IRQn EXTI15_10_IRQn
 #define OLED_SCL_Pin GPIO_PIN_6
 #define OLED_SCL_GPIO_Port GPIOB
 #define OLED_SDA_Pin GPIO_PIN_7

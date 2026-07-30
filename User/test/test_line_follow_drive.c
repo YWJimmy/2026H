@@ -27,7 +27,7 @@ static TestLineFollowKey_t s_key;
 static void Test_LineFollowDrive_InitKey(void)
 {
     GPIO_PinState current =
-        HAL_GPIO_ReadPin(START_KEY_GPIO_Port, START_KEY_Pin);
+        HAL_GPIO_ReadPin(KEY0_GPIO_Port, KEY0_Pin);
 
     s_key.raw_state = current;
     s_key.stable_state = current;
@@ -37,7 +37,7 @@ static void Test_LineFollowDrive_InitKey(void)
 static bool Test_LineFollowDrive_KeyPressed(uint32_t now_ms)
 {
     GPIO_PinState raw =
-        HAL_GPIO_ReadPin(START_KEY_GPIO_Port, START_KEY_Pin);
+        HAL_GPIO_ReadPin(KEY0_GPIO_Port, KEY0_Pin);
 
     if (raw != s_key.raw_state)
     {
@@ -171,7 +171,7 @@ bool Test_LineFollowDrive_Init(void)
 
     (void)BSP_Debug_Printf(
         "TEST,LINE_FOLLOW_DRIVE,READY,BACKEND=%s,"
-        "KEY=PG15_ACTIVE_LOW,DEBOUNCE_MS=%lu\r\n",
+        "KEY=KEY0_PE4_ACTIVE_LOW,DEBOUNCE_MS=%lu\r\n",
         LineSensor_GetBackendName(),
         (unsigned long)LINE_FOLLOW_DRIVE_KEY_DEBOUNCE_MS);
 
