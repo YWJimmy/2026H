@@ -9,6 +9,8 @@ from libs.AI2D import Ai2d
 from libs.AIBase import AIBase
 from libs.PipeLine import PipeLine, ScopedTiming
 from media.sensor import Sensor
+from machine import FPIOA
+from machine import UART
 from steel_ball_temporal_tracker import ShortTermTracker
 import aidemo
 import gc
@@ -33,6 +35,28 @@ PERF_LOG_INTERVAL_FRAMES = 60
 NOMINAL_FRAME_INTERVAL_MS = 29.5
 SERIAL_COMPENSATION_MS = 25.0
 DISPLAY_COMPENSATION_MS = 30.0
+VISION_UART_TX_PIN = 40
+VISION_UART_RX_PIN = 41
+VISION_UART_BAUDRATE = 115200
+
+
+def init_vision_uart():
+    """Initialize PH2.0 interface 1 as UART1 (IO40 TX, IO41 RX)."""
+    fpioa = FPIOA()
+    fpioa.set_function(VISION_UART_TX_PIN, FPIOA.UART1_TXD)
+    fpioa.set_function(VISION_UART_RX_PIN, FPIOA.UART1_RXD)
+    uart = UART(
+        UART.UART1,
+        baudrate=VISION_UART_BAUDRATE,
+        bits=UART.EIGHTBITS,
+        parity=UART.PARITY_NONE,
+        stop=UART.STOPBITS_ONE,
+    )
+    print(
+        "[STEEL-UART] ready uart=1 tx=IO%d rx=IO%d baud=%d"
+        % (VISION_UART_TX_PIN, VISION_UART_RX_PIN, VISION_UART_BAUDRATE)
+    )
+    return uart
 
 
 def verify_kmodel_file():
@@ -191,17 +215,21 @@ class SteelBallYoloV8(AIBase):
         )
 
 
-def report_detection(detection):
+def report_detection(uart, detection):
     if detection is None:
-        print("SB,0,0,0,0,0,0,0,0")
+        line = "SB,0,0,0,0,0,0,0,0\r\n"
+        uart.write(line)
+        print(line, end="")
         return
     x1, y1, x2, y2, score = detection
     center_x = (x1 + x2) // 2
     center_y = (y1 + y2) // 2
-    print(
-        "SB,1,%d,%d,%d,%d,%d,%d,%d"
+    line = (
+        "SB,1,%d,%d,%d,%d,%d,%d,%d\r\n"
         % (x1, y1, x2, y2, center_x, center_y, int(score * 1000))
     )
+    uart.write(line)
+    print(line, end="")
 
 
 def elapsed_ms(start, end):
@@ -211,7 +239,9 @@ def elapsed_ms(start, end):
 def main():
     pipeline = None
     detector = None
+    vision_uart = None
     try:
+        vision_uart = init_vision_uart()
         verify_kmodel_file()
         sensor = Sensor(width=1280, height=960)
         pipeline = PipeLine(
@@ -249,7 +279,7 @@ def main():
                 NOMINAL_FRAME_INTERVAL_MS,
             )
             tracking_ready = time.ticks_us()
-            report_detection(serial_detection)
+            report_detection(vision_uart, serial_detection)
             detector.draw_result(pipeline, display_detection)
             pipeline.show_image()
             display_ready = time.ticks_us()
@@ -281,6 +311,8 @@ def main():
             detector.deinit()
         if pipeline is not None:
             pipeline.destroy()
+        if vision_uart is not None and hasattr(vision_uart, "deinit"):
+            vision_uart.deinit()
         gc.collect()
         nn.shrink_memory_pool()
 

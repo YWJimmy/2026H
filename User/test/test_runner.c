@@ -26,7 +26,8 @@
 
 #elif PROJECT_TEST_MODE == TEST_MODE_LINE_UART
 #include "test_line_uart.h"
-
+#elif PROJECT_TEST_MODE == TEST_MODE_VISION_UART
+#include "test_vision_uart.h"
 #else
 #error "Unsupported PROJECT_TEST_MODE"
 #endif
@@ -61,6 +62,7 @@ bool TestRunner_Init(void)
 #elif PROJECT_TEST_MODE == TEST_MODE_ENCODER
 
     return Test_Encoder_Init();
+<<<<<<< HEAD
 
 #elif PROJECT_TEST_MODE == TEST_MODE_LINE_UART
 
@@ -70,6 +72,12 @@ bool TestRunner_Init(void)
 
     return false;
 
+=======
+#elif PROJECT_TEST_MODE == TEST_MODE_LINE_UART
+    return Test_LineUart_Init();
+#else
+    return Test_VisionUart_Init();
+>>>>>>> 3fd2141030f97bdaf7c63d196d7d5517ab28eede
 #endif
 }
 
@@ -103,11 +111,18 @@ void TestRunner_Update(void)
 #elif PROJECT_TEST_MODE == TEST_MODE_ENCODER
 
     Test_Encoder_Update();
+<<<<<<< HEAD
 
 #elif PROJECT_TEST_MODE == TEST_MODE_LINE_UART
 
     Test_LineUart_Update();
 
+=======
+#elif PROJECT_TEST_MODE == TEST_MODE_LINE_UART
+    Test_LineUart_Update();
+#else
+    Test_VisionUart_Update();
+>>>>>>> 3fd2141030f97bdaf7c63d196d7d5517ab28eede
 #endif
 }
 
@@ -141,10 +156,17 @@ void TestRunner_Stop(void)
 #elif PROJECT_TEST_MODE == TEST_MODE_ENCODER
 
     /* 编码器测试不驱动输出，无需主动停止。 */
+<<<<<<< HEAD
 
 #elif PROJECT_TEST_MODE == TEST_MODE_LINE_UART
 
     Test_LineUart_Stop();
 
+=======
+#elif PROJECT_TEST_MODE == TEST_MODE_LINE_UART
+    Test_LineUart_Stop();
+#else
+    Test_VisionUart_Stop();
+>>>>>>> 3fd2141030f97bdaf7c63d196d7d5517ab28eede
 #endif
 }
