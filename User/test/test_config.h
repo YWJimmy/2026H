@@ -6,6 +6,6 @@
 #define TEST_MODE_LINE_FOLLOW       3U      //巡线偏差是否计算正确
 
 /* Default: verify BSP plus the unified 8-channel data layer. */
-#define PROJECT_TEST_MODE           TEST_MODE_LINE_FOLLOW
+#define PROJECT_TEST_MODE           TEST_MODE_LINE_SENSOR
 
 #endif /* TEST_CONFIG_H */
