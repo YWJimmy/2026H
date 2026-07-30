@@ -76,7 +76,7 @@ bool BSP_LineAdc_Init(void)
 {
     uint32_t primask;
 
-    HAL_GPIO_WritePin(LINE_EN_GPIO_Port, LINE_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(IR_EN_GPIO_Port, IR_EN_Pin, GPIO_PIN_RESET);
 
     primask = LineAdc_EnterCritical();
     memset(s_dma_buffer, 0, sizeof(s_dma_buffer));
@@ -129,14 +129,14 @@ bool BSP_LineAdc_Start(void)
     s_fault = false;
     LineAdc_ExitCritical(primask);
 
-    HAL_GPIO_WritePin(LINE_EN_GPIO_Port, LINE_EN_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(IR_EN_GPIO_Port, IR_EN_Pin, GPIO_PIN_SET);
 
     status = HAL_ADC_Start_DMA(&hadc1,
                                (uint32_t *)s_dma_buffer,
                                BSP_LINE_ADC_CHANNEL_COUNT);
     if (status != HAL_OK)
     {
-        HAL_GPIO_WritePin(LINE_EN_GPIO_Port, LINE_EN_Pin, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(IR_EN_GPIO_Port, IR_EN_Pin, GPIO_PIN_RESET);
         s_error_count++;
         return false;
     }
@@ -149,7 +149,7 @@ bool BSP_LineAdc_Start(void)
     {
         s_running = false;
         (void)HAL_ADC_Stop_DMA(&hadc1);
-        HAL_GPIO_WritePin(LINE_EN_GPIO_Port, LINE_EN_Pin, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(IR_EN_GPIO_Port, IR_EN_Pin, GPIO_PIN_RESET);
         s_error_count++;
         return false;
     }
@@ -177,7 +177,7 @@ bool BSP_LineAdc_Stop(void)
         adc_status = HAL_ADC_Stop_DMA(&hadc1);
     }
 
-    HAL_GPIO_WritePin(LINE_EN_GPIO_Port, LINE_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(IR_EN_GPIO_Port, IR_EN_Pin, GPIO_PIN_RESET);
     s_fault = false;
 
     return (tim_status == HAL_OK) && (adc_status == HAL_OK);
@@ -291,5 +291,5 @@ void BSP_LineAdc_ErrorCallback(ADC_HandleTypeDef *hadc)
     s_running = false;
 
     __HAL_TIM_DISABLE(&htim2);
-    HAL_GPIO_WritePin(LINE_EN_GPIO_Port, LINE_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(IR_EN_GPIO_Port, IR_EN_Pin, GPIO_PIN_RESET);
 }
