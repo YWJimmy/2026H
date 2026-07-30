@@ -81,7 +81,7 @@
           </BeforeMake>
           <AfterMake>
             <RunUserProg1>0</RunUserProg1>
-            <RunUserProg2>0</RunUserProg2>
+            <RunUserProg2>1</RunUserProg2>
             <UserProg1Name></UserProg1Name>
             <UserProg2Name></UserProg2Name>
             <UserProg1Dos16Mode>0</UserProg1Dos16Mode>
@@ -339,7 +339,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../User/bsp;../User/test;..\User\module</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../User/bsp;../User/test;../User/module</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -418,6 +418,11 @@
               <FileType>1</FileType>
               <FilePath>..\User\bsp\bsp_line_adc.c</FilePath>
             </File>
+            <File>
+              <FileName>bsp_line_uart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\bsp\bsp_line_uart.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -467,6 +472,11 @@
               <FileName>test_wheel_speed.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\test\test_wheel_speed.c</FilePath>
+            </File>
+            <File>
+              <FileName>test_line_uart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\test\test_line_uart.c</FilePath>
             </File>
           </Files>
         </Group>

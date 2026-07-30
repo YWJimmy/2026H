@@ -24,6 +24,8 @@ static const int32_t s_speed_steps[] =
 };
 
 #define TEST_WHEEL_SPEED_UNIT_NAME       "MMPS"
+#define TEST_WHEEL_SPEED_USE_CPS         0U
+#define TEST_WHEEL_SPEED_MODE_ENABLED    1U
 
 #elif PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_CPS
 
@@ -39,9 +41,26 @@ static const int32_t s_speed_steps[] =
 };
 
 #define TEST_WHEEL_SPEED_UNIT_NAME       "CPS"
+#define TEST_WHEEL_SPEED_USE_CPS         1U
+#define TEST_WHEEL_SPEED_MODE_ENABLED    1U
 
 #else
-#error "test_wheel_speed.c requires a wheel speed test mode"
+
+/*
+ * 当前编译的是其他测试模式，例如UART巡线测试。
+ *
+ * Keil仍会编译本文件，因此必须保留合法的数组和宏定义，
+ * 但TestRunner不会调用本测试。
+ */
+static const int32_t s_speed_steps[] =
+{
+    0
+};
+
+#define TEST_WHEEL_SPEED_UNIT_NAME       "DISABLED"
+#define TEST_WHEEL_SPEED_USE_CPS         0U
+#define TEST_WHEEL_SPEED_MODE_ENABLED    0U
+
 #endif
 
 #define TEST_WHEEL_SPEED_STEP_COUNT \
@@ -55,13 +74,22 @@ static uint32_t s_last_print_ms = 0U;
 
 static bool Test_WheelSpeed_SetTarget(int32_t target)
 {
-#if PROJECT_TEST_MODE == TEST_MODE_WHEEL_SPEED_MMPS
+#if TEST_WHEEL_SPEED_MODE_ENABLED == 0U
 
-    return Chassis_SetWheelSpeedMmps(target, target);
+    (void)target;
+    return false;
+
+#elif TEST_WHEEL_SPEED_USE_CPS == 1U
+
+    return Chassis_SetWheelSpeedCps(
+        target,
+        target);
 
 #else
 
-    return Chassis_SetWheelSpeedCps(target, target);
+    return Chassis_SetWheelSpeedMmps(
+        target,
+        target);
 
 #endif
 }
@@ -81,6 +109,9 @@ static void Test_WheelSpeed_ApplyStep(void)
 
 bool Test_WheelSpeed_Init(void)
 {
+#if TEST_WHEEL_SPEED_MODE_ENABLED == 0U
+    return false;
+#endif
     s_initialized = false;
     s_finished = false;
     s_step_index = 0U;

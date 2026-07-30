@@ -31,7 +31,10 @@ bool Test_LineSensor_Init(void)
     s_initialized = true;
 
     (void)BSP_Debug_Printf(
-        "TEST,LINE_SENSOR,START,LOGIC_ORDER=L_TO_R,BLACK_BIT=1\r\n");
+        "TEST,LINE_SENSOR,START,BACKEND=%s,CONFIG_OK=%u,"
+        "LOGIC_ORDER=L_TO_R,BLACK_BIT=1\r\n",
+        LineSensor_GetBackendName(),
+        LineSensor_IsBackendConfigConfirmed() ? 1U : 0U);
 
     return true;
 }
@@ -66,7 +69,6 @@ void Test_LineSensor_Update(void)
         (unsigned long)s_latest_frame.sequence,
         (unsigned int)s_latest_frame.black_mask,
         (unsigned int)s_latest_frame.valid_mask);
-
     (void)BSP_Debug_Printf(
         "LINE,RAW=%u,%u,%u,%u,%u,%u,%u,%u\r\n",
         (unsigned int)s_latest_frame.raw[0],
@@ -77,7 +79,6 @@ void Test_LineSensor_Update(void)
         (unsigned int)s_latest_frame.raw[5],
         (unsigned int)s_latest_frame.raw[6],
         (unsigned int)s_latest_frame.raw[7]);
-
     (void)BSP_Debug_Printf(
         "LINE,STR=%u,%u,%u,%u,%u,%u,%u,%u\r\n",
         (unsigned int)s_latest_frame.strength[0],

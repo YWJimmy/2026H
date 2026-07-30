@@ -109,6 +109,10 @@ void Error_Handler(void);
 #define DEBUG_TX_GPIO_Port GPIOA
 #define DEBUG_RX_Pin GPIO_PIN_10
 #define DEBUG_RX_GPIO_Port GPIOA
+#define LINE_UART_TX_Pin GPIO_PIN_10
+#define LINE_UART_TX_GPIO_Port GPIOC
+#define LINE_UART_RX_Pin GPIO_PIN_11
+#define LINE_UART_RX_GPIO_Port GPIOC
 #define VISION_RX_Pin GPIO_PIN_9
 #define VISION_RX_GPIO_Port GPIOG
 #define MOTOR_R_IN2_Pin GPIO_PIN_11
