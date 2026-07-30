@@ -13,6 +13,6 @@
  * 编码器独立测试：
  * 不驱动电机，手动转动车轮。
  */
-#define PROJECT_TEST_MODE               TEST_MODE_ENCODER
+#define PROJECT_TEST_MODE               TEST_MODE_MOTOR_OPEN_LOOP
 
 #endif /* TEST_CONFIG_H */
