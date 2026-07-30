@@ -2,6 +2,7 @@
 
 #include "bsp_debug_uart.h"
 #include "chassis.h"
+#include "chassis_config.h"
 #include "stm32f4xx_hal.h"
 #include "test_config.h"
 
@@ -47,10 +48,9 @@ static const int32_t s_speed_steps[] =
 #else
 
 /*
- * 当前编译的是其他测试模式，例如UART巡线测试。
- *
- * Keil仍会编译本文件，因此必须保留合法的数组和宏定义，
- * 但TestRunner不会调用本测试。
+ * 最新工程始终编译test_wheel_speed.c，即使当前选择UART巡线、
+ * line_follow等其他测试。此分支保证文件在非轮速模式下仍可编译，
+ * 但TestRunner不会调用轮速测试。
  */
 static const int32_t s_speed_steps[] =
 {
@@ -81,15 +81,11 @@ static bool Test_WheelSpeed_SetTarget(int32_t target)
 
 #elif TEST_WHEEL_SPEED_USE_CPS == 1U
 
-    return Chassis_SetWheelSpeedCps(
-        target,
-        target);
+    return Chassis_SetWheelSpeedCps(target, target);
 
 #else
 
-    return Chassis_SetWheelSpeedMmps(
-        target,
-        target);
+    return Chassis_SetWheelSpeedMmps(target, target);
 
 #endif
 }
@@ -101,10 +97,62 @@ static void Test_WheelSpeed_ApplyStep(void)
     (void)Test_WheelSpeed_SetTarget(target);
 
     (void)BSP_Debug_Printf(
-        "WSPD,STEP=%u,UNIT=%s,TARGET=%ld\r\n",
+        "WSPD,STEP=%u,U=%s,T=%ld\r\n",
         (unsigned int)s_step_index,
         TEST_WHEEL_SPEED_UNIT_NAME,
         (long)target);
+}
+
+static void Test_WheelSpeed_PrintStatus(
+    const ChassisStatus_t *status)
+{
+    /*
+     * 拆成三条短消息，避免USART1调试队列单条160字节上限截断。
+     */
+    (void)BSP_Debug_Printf(
+        "WSPDS,S=%lu,DT=%u,"
+        "TMM=%ld/%ld,MMM=%ld/%ld,"
+        "TC=%ld/%ld,MC=%ld/%ld,E=%ld/%ld\r\n",
+        (unsigned long)status->control_sequence,
+        (unsigned int)status->dt_ms,
+        (long)status->left_target_mm_s,
+        (long)status->right_target_mm_s,
+        (long)status->left_measured_mm_s,
+        (long)status->right_measured_mm_s,
+        (long)status->left_target_cps,
+        (long)status->right_target_cps,
+        (long)status->left_measured_cps,
+        (long)status->right_measured_cps,
+        (long)status->left_error_cps,
+        (long)status->right_error_cps);
+
+    (void)BSP_Debug_Printf(
+        "WSPDP,S=%lu,FF=%d/%d,"
+        "P=%ld/%ld,I=%ld/%ld,U=%d/%d\r\n",
+        (unsigned long)status->control_sequence,
+        (int)status->left_feedforward_pwm,
+        (int)status->right_feedforward_pwm,
+        (long)status->left_proportional_pwm,
+        (long)status->right_proportional_pwm,
+        (long)status->left_integral_pwm,
+        (long)status->right_integral_pwm,
+        (int)status->left_pwm,
+        (int)status->right_pwm);
+
+    (void)BSP_Debug_Printf(
+        "WSPDX,S=%lu,D=%d/%d,SAT=%u/%u,V=%u,"
+        "REJ=%lu/%lu,OVR=%lu,DROP=%lu,TR=%lu\r\n",
+        (unsigned long)status->control_sequence,
+        (int)status->left_delta,
+        (int)status->right_delta,
+        status->left_output_saturated ? 1U : 0U,
+        status->right_output_saturated ? 1U : 0U,
+        status->encoder_sample_valid ? 1U : 0U,
+        (unsigned long)status->left_encoder_reject_count,
+        (unsigned long)status->right_encoder_reject_count,
+        (unsigned long)status->timing_overrun_count,
+        (unsigned long)BSP_DebugUart_GetDroppedCount(),
+        (unsigned long)BSP_DebugUart_GetTruncatedCount());
 }
 
 bool Test_WheelSpeed_Init(void)
@@ -112,6 +160,7 @@ bool Test_WheelSpeed_Init(void)
 #if TEST_WHEEL_SPEED_MODE_ENABLED == 0U
     return false;
 #endif
+
     s_initialized = false;
     s_finished = false;
     s_step_index = 0U;
@@ -138,11 +187,16 @@ bool Test_WheelSpeed_Init(void)
     s_initialized = true;
 
     (void)BSP_Debug_Printf(
-        "TEST,WHEEL_SPEED,START,UNIT=%s,"
-        "HOLD_MS=%lu,PRINT_MS=%lu,NOTICE=LIFT_WHEELS\r\n",
+        "TEST,WHEEL_SPEED,START,U=%s,HOLD=%lu,PRINT=%lu,"
+        "KP=%ld/%ld,KI=%ld/%ld,FF=%u,LIFT=1\r\n",
         TEST_WHEEL_SPEED_UNIT_NAME,
         (unsigned long)TEST_WHEEL_SPEED_STEP_HOLD_MS,
-        (unsigned long)TEST_WHEEL_SPEED_PRINT_MS);
+        (unsigned long)TEST_WHEEL_SPEED_PRINT_MS,
+        (long)WHEEL_SPEED_LEFT_KP_Q10,
+        (long)WHEEL_SPEED_RIGHT_KP_Q10,
+        (long)WHEEL_SPEED_LEFT_KI_Q10,
+        (long)WHEEL_SPEED_RIGHT_KI_Q10,
+        (unsigned int)WHEEL_SPEED_FEEDFORWARD_ENABLE);
 
     Test_WheelSpeed_ApplyStep();
     return true;
@@ -170,38 +224,7 @@ void Test_WheelSpeed_Update(void)
 
         if (Chassis_GetStatus(&status))
         {
-            (void)BSP_Debug_Printf(
-                "WSPD,SEQ=%lu,DT=%u,"
-                "LTG_MM=%ld,RTG_MM=%ld,"
-                "LM_MM=%ld,RM_MM=%ld,"
-                "LTG_CPS=%ld,RTG_CPS=%ld,"
-                "LM_CPS=%ld,RM_CPS=%ld,"
-                "LRAW=%ld,RRAW=%ld,"
-                "LE=%ld,RE=%ld,"
-                "LI=%ld,RI=%ld,"
-                "LP=%d,RP=%d,"
-                "LD=%d,RD=%d,OVR=%lu\r\n",
-                (unsigned long)status.control_sequence,
-                (unsigned int)status.dt_ms,
-                (long)status.left_target_mm_s,
-                (long)status.right_target_mm_s,
-                (long)status.left_measured_mm_s,
-                (long)status.right_measured_mm_s,
-                (long)status.left_target_cps,
-                (long)status.right_target_cps,
-                (long)status.left_measured_cps,
-                (long)status.right_measured_cps,
-                (long)status.left_raw_measured_cps,
-                (long)status.right_raw_measured_cps,
-                (long)status.left_error_cps,
-                (long)status.right_error_cps,
-                (long)status.left_integral_pwm,
-                (long)status.right_integral_pwm,
-                (int)status.left_pwm,
-                (int)status.right_pwm,
-                (int)status.left_delta,
-                (int)status.right_delta,
-                (unsigned long)status.timing_overrun_count);
+            Test_WheelSpeed_PrintStatus(&status);
         }
     }
 

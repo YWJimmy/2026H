@@ -12,6 +12,9 @@ typedef struct
 {
     bool initialized;
     bool enabled;
+    bool encoder_sample_valid;
+    bool left_output_saturated;
+    bool right_output_saturated;
 
     int32_t left_target_mm_s;
     int32_t right_target_mm_s;
@@ -27,6 +30,10 @@ typedef struct
     int32_t left_error_cps;
     int32_t right_error_cps;
 
+    int16_t left_feedforward_pwm;
+    int16_t right_feedforward_pwm;
+    int32_t left_proportional_pwm;
+    int32_t right_proportional_pwm;
     int32_t left_integral_pwm;
     int32_t right_integral_pwm;
     int16_t left_pwm;
@@ -41,10 +48,12 @@ typedef struct
     uint32_t control_sequence;
     uint32_t timestamp_ms;
     uint32_t timing_overrun_count;
+    uint32_t left_encoder_reject_count;
+    uint32_t right_encoder_reject_count;
 } ChassisStatus_t;
 
 /**
- * @brief 初始化电机、编码器和左右轮PI控制器。
+ * @brief 初始化电机、编码器和左右轮“前馈+PI”控制器。
  *
  * 初始化后TB6612保持待机，不会驱动电机。
  */
@@ -53,7 +62,7 @@ bool Chassis_Init(void);
 /**
  * @brief 使能或关闭底盘。
  *
- * 使能时重置编码器基准和PI状态；
+ * 使能时重置编码器基准和控制器状态；
  * 关闭时立即短路刹车并拉低TB6612 STBY。
  */
 bool Chassis_Enable(bool enable);
@@ -79,8 +88,6 @@ bool Chassis_SetWheelSpeedMmps(int32_t left_mm_s,
 
 /**
  * @brief 直接设置左右轮目标速度，单位count/s。
- *
- * PI内部统一使用count/s；本接口绕过机械单位换算。
  */
 bool Chassis_SetWheelSpeedCps(int32_t left_cps,
                               int32_t right_cps);
@@ -105,7 +112,16 @@ bool Chassis_SetWheelPiGainsQ10(int32_t left_kp_q10,
                                 int32_t right_ki_q10);
 
 /**
- * @brief 目标清零、清积分并立即短路刹车。
+ * @brief 运行时更新左右轮前馈参数。
+ */
+bool Chassis_SetWheelFeedforwardQ10(
+    int32_t left_gain_q10,
+    int16_t left_static_pwm,
+    int32_t right_gain_q10,
+    int16_t right_static_pwm);
+
+/**
+ * @brief 目标清零、清控制器并立即短路刹车。
  */
 void Chassis_Stop(void);
 
@@ -114,8 +130,8 @@ void Chassis_Stop(void);
  *
  * 主循环中持续调用，标称每5 ms执行一次控制。
  *
- * @return true 本次执行了一个控制周期。
- * @return false 尚未到周期、未使能或发生严重超时。
+ * @return true 本次执行了一个有效控制周期。
+ * @return false 尚未到周期、未使能、严重超时或编码器样本被拒绝。
  */
 bool Chassis_Update(void);
 

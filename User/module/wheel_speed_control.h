@@ -15,7 +15,11 @@ typedef struct
     int32_t kp_q10;
     int32_t ki_q10;
 
+    int32_t feedforward_gain_q10;
+    int16_t feedforward_static_pwm;
+
     int16_t pwm_limit;
+    int16_t integral_limit_pwm;
     int16_t min_drive_pwm;
 
     uint16_t nominal_period_ms;
@@ -31,8 +35,11 @@ typedef struct
     int32_t measured_cps;
     int32_t error_cps;
 
+    int16_t feedforward_pwm;
+    int32_t proportional_pwm;
     int32_t integral_q10;
     int16_t output_pwm;
+    bool output_saturated;
 
     int16_t delta_history[WHEEL_SPEED_FILTER_WINDOW_MAX];
     uint16_t dt_history[WHEEL_SPEED_FILTER_WINDOW_MAX];
@@ -45,7 +52,7 @@ typedef struct
 } WheelSpeedController_t;
 
 /**
- * @brief 初始化单轮整数定点PI控制器。
+ * @brief 初始化单轮整数定点“前馈+PI”控制器。
  */
 bool WheelSpeedControl_Init(WheelSpeedController_t *controller,
                             const WheelSpeedConfig_t *config);
@@ -71,10 +78,20 @@ bool WheelSpeedControl_SetGainsQ10(WheelSpeedController_t *controller,
                                    int32_t ki_q10);
 
 /**
+ * @brief 运行时更新前馈系数。
+ *
+ * PWM_ff = static + gain_q10 × target_cps / 1024。
+ */
+bool WheelSpeedControl_SetFeedforwardQ10(
+    WheelSpeedController_t *controller,
+    int32_t feedforward_gain_q10,
+    int16_t feedforward_static_pwm);
+
+/**
  * @brief 根据本周期编码器增量计算新PWM。
  *
- * 控制器每次调用都运行PI；速度反馈使用最近N个周期滑动平均，
- * N由config.measurement_window设置。
+ * 控制器每次调用都运行前馈+PI；速度反馈使用最近N个周期
+ * 的滑动平均，N由config.measurement_window设置。
  *
  * @param delta_counts 本周期编码器增量。
  * @param dt_ms 实际采样间隔，单位ms。
@@ -96,10 +113,19 @@ int32_t WheelSpeedControl_GetMeasuredCps(
 int32_t WheelSpeedControl_GetErrorCps(
     const WheelSpeedController_t *controller);
 
+int16_t WheelSpeedControl_GetFeedforwardPwm(
+    const WheelSpeedController_t *controller);
+
+int32_t WheelSpeedControl_GetProportionalPwm(
+    const WheelSpeedController_t *controller);
+
 int32_t WheelSpeedControl_GetIntegralPwm(
     const WheelSpeedController_t *controller);
 
 int16_t WheelSpeedControl_GetOutputPwm(
+    const WheelSpeedController_t *controller);
+
+bool WheelSpeedControl_IsOutputSaturated(
     const WheelSpeedController_t *controller);
 
 #ifdef __cplusplus

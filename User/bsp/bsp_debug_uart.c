@@ -29,16 +29,19 @@ typedef struct
 } DebugUartMessage_t;
 
 static DebugUartMessage_t s_queue[BSP_DEBUG_UART_QUEUE_DEPTH];
+
 static volatile uint8_t s_head = 0U;
 static volatile uint8_t s_tail = 0U;
 static volatile uint8_t s_count = 0U;
 static volatile bool s_dma_busy = false;
 static volatile bool s_initialized = false;
 static volatile uint32_t s_dropped_count = 0U;
+static volatile uint32_t s_truncated_count = 0U;
 
 static uint32_t DebugUart_EnterCritical(void)
 {
     uint32_t primask = __get_PRIMASK();
+
     __disable_irq();
     return primask;
 }
@@ -54,11 +57,21 @@ static void DebugUart_ExitCritical(uint32_t primask)
 static uint8_t DebugUart_NextIndex(uint8_t index)
 {
     index++;
+
     if (index >= BSP_DEBUG_UART_QUEUE_DEPTH)
     {
         index = 0U;
     }
+
     return index;
+}
+
+static void DebugUart_CountTruncated(void)
+{
+    uint32_t primask = DebugUart_EnterCritical();
+
+    s_truncated_count++;
+    DebugUart_ExitCritical(primask);
 }
 
 bool BSP_DebugUart_Init(void)
@@ -66,12 +79,15 @@ bool BSP_DebugUart_Init(void)
     uint32_t primask;
 
     primask = DebugUart_EnterCritical();
+
     s_head = 0U;
     s_tail = 0U;
     s_count = 0U;
     s_dma_busy = false;
     s_dropped_count = 0U;
+    s_truncated_count = 0U;
     s_initialized = false;
+
     DebugUart_ExitCritical(primask);
 
     if ((huart1.Instance != USART1) || (huart1.hdmatx == NULL))
@@ -105,6 +121,7 @@ bool BSP_DebugUart_Write(const uint8_t *data, size_t length)
     if (length > BSP_DEBUG_UART_MESSAGE_MAX_LENGTH)
     {
         stored_length = (uint16_t)BSP_DEBUG_UART_MESSAGE_MAX_LENGTH;
+        DebugUart_CountTruncated();
     }
     else
     {
@@ -123,6 +140,7 @@ bool BSP_DebugUart_Write(const uint8_t *data, size_t length)
     write_index = s_head;
     memcpy(s_queue[write_index].data, data, stored_length);
     s_queue[write_index].length = stored_length;
+
     s_head = DebugUart_NextIndex(s_head);
     s_count++;
 
@@ -155,7 +173,20 @@ int BSP_Debug_Printf(const char *format, ...)
 
     if ((size_t)formatted_length >= sizeof(buffer))
     {
+        /*
+         * 缓冲区最后一个字节保留给'\0'。
+         * 将实际排队内容末尾替换为“...\r\n”，保证被截断的消息
+         * 仍以完整换行结束，不与下一条日志粘连。
+         */
         queued_length = sizeof(buffer) - 1U;
+
+        buffer[queued_length - 5U] = '.';
+        buffer[queued_length - 4U] = '.';
+        buffer[queued_length - 3U] = '.';
+        buffer[queued_length - 2U] = '\r';
+        buffer[queued_length - 1U] = '\n';
+
+        DebugUart_CountTruncated();
     }
     else
     {
@@ -199,6 +230,7 @@ void BSP_DebugUart_Process(void)
     }
 
     status = HAL_UART_Transmit_DMA(&huart1, data, length);
+
     if (status != HAL_OK)
     {
         primask = DebugUart_EnterCritical();
@@ -225,6 +257,7 @@ void BSP_DebugUart_TxCpltCallback(UART_HandleTypeDef *huart)
     }
 
     s_dma_busy = false;
+
     DebugUart_ExitCritical(primask);
 
     BSP_DebugUart_Process();
@@ -251,6 +284,7 @@ void BSP_DebugUart_ErrorCallback(UART_HandleTypeDef *huart)
     }
 
     s_dma_busy = false;
+
     DebugUart_ExitCritical(primask);
 
     BSP_DebugUart_Process();
@@ -264,6 +298,11 @@ bool BSP_DebugUart_IsBusy(void)
 uint32_t BSP_DebugUart_GetDroppedCount(void)
 {
     return s_dropped_count;
+}
+
+uint32_t BSP_DebugUart_GetTruncatedCount(void)
+{
+    return s_truncated_count;
 }
 
 void BSP_DebugUart_ClearPending(void)
