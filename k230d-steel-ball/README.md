@@ -28,6 +28,19 @@ NMS IoU 阈值：0.45
 | `steel_ball_yolov8_v2_full_w8a8_stable.py` | 摄像头采集、推理、单目标选择、显示和 `SB` 输出入口 |
 | `steel_ball_temporal_tracker.py` | 一帧短时跟踪、速度滤波和延迟补偿 |
 
+## 与 STM32F407 串口连接
+
+K230D BOX 使用 PH2.0 接口1，对应 K230D `UART1`：
+
+```text
+K230D PH2.0接口1 UART1_TXD / IO40 → STM32 PG9  / USART6_RX
+K230D PH2.0接口1 UART1_RXD / IO41 ← STM32 PG14 / USART6_TX
+K230D GND                            ↔ STM32 GND
+```
+
+两端统一使用 `115200, 8N1`，无硬件流控。TX/RX 必须交叉连接并共地。
+当前 K230D 只主动发送检测结果，保留 RX 接线用于后续命令或握手扩展。
+
 模型大小：`3,365,584` 字节；SHA-256：
 
 ```text
@@ -88,6 +101,9 @@ steel_ball_yolov8_v2_full_w8a8_stable.py
 `main.py`。模型文件名必须与脚本中的 `KMODEL_PATH` 完全一致。
 
 ## 输出协议
+
+稳定部署脚本通过 PH2.0 接口1的 UART1 发送 ASCII 文本帧，每帧以 `\r\n`
+结束；同样内容同时保留在 CanMV IDE 串行终端中，便于调试。
 
 检测到小钢球：
 

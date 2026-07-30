@@ -423,6 +423,11 @@
               <FileType>1</FileType>
               <FilePath>..\User\bsp\bsp_line_uart.c</FilePath>
             </File>
+            <File>
+              <FileName>bsp_vision_uart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\bsp\bsp_vision_uart.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -477,6 +482,11 @@
               <FileName>test_line_uart.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\test\test_line_uart.c</FilePath>
+            </File>
+            <File>
+              <FileName>test_vision_uart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\test\test_vision_uart.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -718,6 +728,16 @@
               <FileName>wheel_speed_control.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\module\wheel_speed_control.c</FilePath>
+            </File>
+            <File>
+              <FileName>vision_protocol.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\module\vision_protocol.c</FilePath>
+            </File>
+            <File>
+              <FileName>vision.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\module\vision.c</FilePath>
             </File>
           </Files>
         </Group>

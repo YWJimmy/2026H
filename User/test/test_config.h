@@ -9,13 +9,14 @@
 #define TEST_MODE_CHASSIS_STRAIGHT      6U
 #define TEST_MODE_ENCODER               7U
 #define TEST_MODE_LINE_UART             8U
+#define TEST_MODE_VISION_UART           9U
 
 /*
- * 新 UART 八路模块先运行原始通信测试：
+ * K230D 视觉串口安全测试：
  * - 不驱动电机；
- * - 不解释黑白极性；
- * - 不假定 S1 位于左侧或右侧。
+ * - 接收并解析 SB 帧；
+ * - 通过 USART1 调试串口输出通信统计。
  */
-#define PROJECT_TEST_MODE               TEST_MODE_LINE_UART
+#define PROJECT_TEST_MODE               TEST_MODE_VISION_UART
 
 #endif /* TEST_CONFIG_H */

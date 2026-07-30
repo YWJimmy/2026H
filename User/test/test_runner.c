@@ -18,6 +18,8 @@
 #include "test_encoder.h"
 #elif PROJECT_TEST_MODE == TEST_MODE_LINE_UART
 #include "test_line_uart.h"
+#elif PROJECT_TEST_MODE == TEST_MODE_VISION_UART
+#include "test_vision_uart.h"
 #else
 #error "Unsupported PROJECT_TEST_MODE"
 #endif
@@ -38,8 +40,10 @@ bool TestRunner_Init(void)
     return Test_ChassisStraight_Init();
 #elif PROJECT_TEST_MODE == TEST_MODE_ENCODER
     return Test_Encoder_Init();
-#else
+#elif PROJECT_TEST_MODE == TEST_MODE_LINE_UART
     return Test_LineUart_Init();
+#else
+    return Test_VisionUart_Init();
 #endif
 }
 
@@ -59,8 +63,10 @@ void TestRunner_Update(void)
     Test_ChassisStraight_Update();
 #elif PROJECT_TEST_MODE == TEST_MODE_ENCODER
     Test_Encoder_Update();
-#else
+#elif PROJECT_TEST_MODE == TEST_MODE_LINE_UART
     Test_LineUart_Update();
+#else
+    Test_VisionUart_Update();
 #endif
 }
 
@@ -80,7 +86,9 @@ void TestRunner_Stop(void)
     Test_ChassisStraight_Stop();
 #elif PROJECT_TEST_MODE == TEST_MODE_ENCODER
     /* 编码器测试不驱动输出，无需主动停止。 */
-#else
+#elif PROJECT_TEST_MODE == TEST_MODE_LINE_UART
     Test_LineUart_Stop();
+#else
+    Test_VisionUart_Stop();
 #endif
 }

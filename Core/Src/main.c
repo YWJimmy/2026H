@@ -30,6 +30,7 @@
 #include "bsp_debug_uart.h"
 #include "bsp_line_adc.h"
 #include "bsp_line_uart.h"
+#include "bsp_vision_uart.h"
 #include "test_runner.h"
 /* USER CODE END Includes */
 
@@ -181,12 +182,14 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     BSP_LineUart_RxCpltCallback(huart);
+    BSP_VisionUart_RxCpltCallback(huart);
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
     BSP_DebugUart_ErrorCallback(huart);
     BSP_LineUart_ErrorCallback(huart);
+    BSP_VisionUart_ErrorCallback(huart);
 }
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
