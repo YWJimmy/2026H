@@ -453,6 +453,21 @@
               <FileType>1</FileType>
               <FilePath>..\User\test\test_runner.c</FilePath>
             </File>
+            <File>
+              <FileName>test_chassis_straight.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\test\test_chassis_straight.c</FilePath>
+            </File>
+            <File>
+              <FileName>test_motor_open_loop.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\test\test_motor_open_loop.c</FilePath>
+            </File>
+            <File>
+              <FileName>test_wheel_speed.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\test\test_wheel_speed.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -683,6 +698,16 @@
               <FileName>line_sensor.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\module\line_sensor.c</FilePath>
+            </File>
+            <File>
+              <FileName>chassis.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\module\chassis.c</FilePath>
+            </File>
+            <File>
+              <FileName>wheel_speed_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\module\wheel_speed_control.c</FilePath>
             </File>
           </Files>
         </Group>
