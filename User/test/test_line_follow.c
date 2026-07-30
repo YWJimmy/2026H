@@ -33,7 +33,10 @@ bool Test_LineFollow_Init(void)
     s_initialized = true;
 
     (void)BSP_Debug_Printf(
-        "TEST,LINE_FOLLOW,START,POS_RANGE=-7000_TO_7000\r\n");
+        "TEST,LINE_FOLLOW,START,BACKEND=%s,CONFIG_OK=%u,"
+        "POS_RANGE=-7000_TO_7000\r\n",
+        LineSensor_GetBackendName(),
+        LineSensor_IsBackendConfigConfirmed() ? 1U : 0U);
 
     return true;
 }

@@ -3,45 +3,71 @@
 
 #include <stdint.h>
 
-/*
- * 八路巡线传感器配置文件
- * 修改硬件类型、安装方向或标定参数时，仅需修改本文件。
- */
-
 /* ================= 巡线模块类型配置 ================= */
-/* 选择巡线模块输入方式：ADC模拟八路或GPIO数字八路 */
 #define LINE_SENSOR_BACKEND_ADC8             1U
 #define LINE_SENSOR_BACKEND_GPIO8            2U
-/* 当前使用ADC模拟八路巡线模块 */
-#define LINE_SENSOR_BACKEND                  LINE_SENSOR_BACKEND_ADC8
+#define LINE_SENSOR_BACKEND_UART8            3U
 
-/* ================= 传感器方向配置 ================= */
-/* 定义八路传感器逻辑顺序：0为最左侧，7为最右侧 */
-#define LINE_SENSOR_CHANNEL_MAP_INIT          \
+/* 当前正式后端切换为新 UART 八路模块。 */
+#define LINE_SENSOR_BACKEND                  LINE_SENSOR_BACKEND_UART8
+
+/* ================= ADC 旧后端配置 ================= */
+#define LINE_SENSOR_ADC_CHANNEL_MAP_INIT      \
 {                                             \
     0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U           \
 }
-/* ================= ADC标定配置 ================= */
-/* 白色区域ADC采样值，需要根据实际测试结果修改 */
+
 #define LINE_SENSOR_WHITE_RAW_INIT            \
 {                                             \
     3100U, 3100U, 3100U, 3100U,               \
     3100U, 3100U, 3100U, 3100U                \
 }
-/* 黑线区域ADC采样值，需要根据实际测试结果修改 */
+
 #define LINE_SENSOR_BLACK_RAW_INIT            \
 {                                             \
     3700U, 3700U, 3700U, 3700U,               \
     3700U, 3700U, 3700U, 3700U                \
 }
 
-/* ================= 黑白判断配置 ================= */
-/* 黑白判断迟滞阈值，用于减少边界抖动 */
-#define LINE_SENSOR_BLACK_ON_THRESHOLD        600U
-#define LINE_SENSOR_WHITE_ON_THRESHOLD        400U
-/* ================= 标定有效性配置 ================= */
-
-/* 黑白ADC差值小于该值时，认为该通道标定无效 */
+#define LINE_SENSOR_BLACK_ON_THRESHOLD       600U
+#define LINE_SENSOR_WHITE_ON_THRESHOLD       400U
 #define LINE_SENSOR_MIN_CALIBRATION_SPAN      16U
+
+/* ================= UART 新后端配置 ================= */
+/*
+ * 必须完成逐路实测后才能置 1：
+ * 1. 确认原始位 1/0 哪个表示检测到黑线；
+ * 2. 确认 S1 在车辆左侧还是右侧。
+ *
+ * 为 0 时仍可读取 raw[]，但 valid_mask 固定为 0，
+ * line_follow 会进入 INVALID，避免未确认配置时驱动车辆。
+ */
+/* 极性和安装方向均已实测确认。 */
+#define LINE_SENSOR_UART_CONFIG_CONFIRMED    1U
+
+/* 检测到黑线时模块原始位值：实测后设为 0U 或 1U。 */
+/* 黑线对应原始数字1，白底对应0。 */
+#define LINE_SENSOR_UART_BLACK_LEVEL         1U
+
+/*
+ * 逻辑通道 0~7 始终定义为车辆最左到最右。
+ * 数组元素是协议物理通道索引：0=S1，7=S8。
+ *
+ * 若 S1 在最左：{0,1,2,3,4,5,6,7}
+ * 若 S1 在最右：{7,6,5,4,3,2,1,0}
+ */
+
+ /*
+ * 逻辑通道0～7定义为车辆最左到最右。
+ * S1～S8本身就是从左到右，因此保持顺序。
+ */
+#define LINE_SENSOR_UART_CHANNEL_MAP_INIT     \
+{                                             \
+    0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U           \
+}
+
+#if LINE_SENSOR_UART_BLACK_LEVEL > 1U
+#error "LINE_SENSOR_UART_BLACK_LEVEL must be 0U or 1U"
+#endif
 
 #endif /* LINE_SENSOR_CONFIG_H */

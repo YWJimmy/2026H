@@ -1,7 +1,7 @@
 #include "wheel_speed_control.h"
 
-#include <limits.h>
 #include <stddef.h>
+#include <string.h>
 
 #define WHEEL_SPEED_Q10_SCALE    ((int32_t)1024)
 
@@ -51,7 +51,7 @@ static int16_t WheelSpeed_ApplyMinimumDrive(
 
     /*
      * 只对与目标同方向的驱动量做死区补偿。
-     * 若PI因超速给出反向修正，不应把它强制改回目标方向。
+     * 若控制器因超速输出0，不强制补回最小PWM。
      */
     if ((pwm == 0) ||
         ((pwm > 0) && (target_cps < 0)) ||
@@ -72,6 +72,114 @@ static int16_t WheelSpeed_ApplyMinimumDrive(
         (int16_t)(-minimum_drive_pwm);
 }
 
+static int16_t WheelSpeed_CalculateFeedforward(
+    const WheelSpeedController_t *controller)
+{
+    int64_t target_magnitude;
+    int64_t feedforward_magnitude;
+
+    if (controller->target_cps == 0)
+    {
+        return 0;
+    }
+
+    target_magnitude =
+        (controller->target_cps < 0) ?
+        -(int64_t)controller->target_cps :
+        (int64_t)controller->target_cps;
+
+    feedforward_magnitude =
+        (int64_t)controller->config.feedforward_static_pwm +
+        (((int64_t)controller->config.feedforward_gain_q10 *
+          target_magnitude +
+          (WHEEL_SPEED_Q10_SCALE / 2)) /
+         WHEEL_SPEED_Q10_SCALE);
+
+    if (feedforward_magnitude >
+        (int64_t)controller->config.pwm_limit)
+    {
+        feedforward_magnitude =
+            (int64_t)controller->config.pwm_limit;
+    }
+
+    return (controller->target_cps > 0) ?
+        (int16_t)feedforward_magnitude :
+        (int16_t)(-feedforward_magnitude);
+}
+
+static void WheelSpeed_ClearMeasurementHistory(
+    WheelSpeedController_t *controller)
+{
+    memset(controller->delta_history,
+           0,
+           sizeof(controller->delta_history));
+
+    memset(controller->dt_history,
+           0,
+           sizeof(controller->dt_history));
+
+    controller->delta_sum = 0;
+    controller->dt_sum = 0U;
+    controller->history_index = 0U;
+    controller->history_count = 0U;
+    controller->raw_measured_cps = 0;
+    controller->measured_cps = 0;
+}
+
+static void WheelSpeed_UpdateMeasurement(
+    WheelSpeedController_t *controller,
+    int16_t delta_counts,
+    uint16_t dt_ms)
+{
+    uint8_t index;
+
+    controller->raw_measured_cps =
+        (int32_t)(((int64_t)delta_counts * 1000LL) /
+                  (int64_t)dt_ms);
+
+    index = controller->history_index;
+
+    if (controller->history_count >=
+        controller->config.measurement_window)
+    {
+        controller->delta_sum -=
+            (int32_t)controller->delta_history[index];
+
+        controller->dt_sum -=
+            (uint32_t)controller->dt_history[index];
+    }
+    else
+    {
+        controller->history_count++;
+    }
+
+    controller->delta_history[index] = delta_counts;
+    controller->dt_history[index] = dt_ms;
+
+    controller->delta_sum += (int32_t)delta_counts;
+    controller->dt_sum += (uint32_t)dt_ms;
+
+    index++;
+
+    if (index >= controller->config.measurement_window)
+    {
+        index = 0U;
+    }
+
+    controller->history_index = index;
+
+    if (controller->dt_sum == 0U)
+    {
+        controller->measured_cps = 0;
+    }
+    else
+    {
+        controller->measured_cps =
+            (int32_t)(((int64_t)controller->delta_sum * 1000LL) /
+                      (int64_t)controller->dt_sum);
+    }
+}
+
 bool WheelSpeedControl_Init(WheelSpeedController_t *controller,
                             const WheelSpeedConfig_t *config)
 {
@@ -79,20 +187,24 @@ bool WheelSpeedControl_Init(WheelSpeedController_t *controller,
         (config == NULL) ||
         (config->kp_q10 < 0) ||
         (config->ki_q10 < 0) ||
+        (config->feedforward_gain_q10 < 0) ||
+        (config->feedforward_static_pwm < 0) ||
         (config->pwm_limit <= 0) ||
+        (config->feedforward_static_pwm > config->pwm_limit) ||
+        (config->integral_limit_pwm < 0) ||
+        (config->integral_limit_pwm > config->pwm_limit) ||
         (config->min_drive_pwm < 0) ||
         (config->min_drive_pwm > config->pwm_limit) ||
-        (config->nominal_period_ms == 0U))
+        (config->nominal_period_ms == 0U) ||
+        (config->measurement_window == 0U) ||
+        (config->measurement_window >
+         WHEEL_SPEED_FILTER_WINDOW_MAX))
     {
         return false;
     }
 
+    memset(controller, 0, sizeof(*controller));
     controller->config = *config;
-    controller->target_cps = 0;
-    controller->measured_cps = 0;
-    controller->error_cps = 0;
-    controller->integral_q10 = 0;
-    controller->output_pwm = 0;
     controller->initialized = true;
 
     return true;
@@ -106,10 +218,14 @@ void WheelSpeedControl_Reset(WheelSpeedController_t *controller)
     }
 
     controller->target_cps = 0;
-    controller->measured_cps = 0;
     controller->error_cps = 0;
+    controller->feedforward_pwm = 0;
+    controller->proportional_pwm = 0;
     controller->integral_q10 = 0;
     controller->output_pwm = 0;
+    controller->output_saturated = false;
+
+    WheelSpeed_ClearMeasurementHistory(controller);
 }
 
 bool WheelSpeedControl_SetTargetCps(WheelSpeedController_t *controller,
@@ -129,10 +245,64 @@ bool WheelSpeedControl_SetTargetCps(WheelSpeedController_t *controller,
     if ((target_cps == 0) || direction_changed)
     {
         controller->integral_q10 = 0;
+        controller->feedforward_pwm = 0;
+        controller->proportional_pwm = 0;
         controller->output_pwm = 0;
+        controller->output_saturated = false;
     }
 
     controller->target_cps = target_cps;
+    return true;
+}
+
+bool WheelSpeedControl_SetGainsQ10(WheelSpeedController_t *controller,
+                                   int32_t kp_q10,
+                                   int32_t ki_q10)
+{
+    if ((controller == NULL) ||
+        (!controller->initialized) ||
+        (kp_q10 < 0) ||
+        (ki_q10 < 0))
+    {
+        return false;
+    }
+
+    controller->config.kp_q10 = kp_q10;
+    controller->config.ki_q10 = ki_q10;
+    controller->integral_q10 = 0;
+    controller->proportional_pwm = 0;
+    controller->output_pwm = 0;
+    controller->output_saturated = false;
+
+    return true;
+}
+
+bool WheelSpeedControl_SetFeedforwardQ10(
+    WheelSpeedController_t *controller,
+    int32_t feedforward_gain_q10,
+    int16_t feedforward_static_pwm)
+{
+    if ((controller == NULL) ||
+        (!controller->initialized) ||
+        (feedforward_gain_q10 < 0) ||
+        (feedforward_static_pwm < 0) ||
+        (feedforward_static_pwm > controller->config.pwm_limit))
+    {
+        return false;
+    }
+
+    controller->config.feedforward_gain_q10 =
+        feedforward_gain_q10;
+
+    controller->config.feedforward_static_pwm =
+        feedforward_static_pwm;
+
+    controller->feedforward_pwm = 0;
+    controller->integral_q10 = 0;
+    controller->proportional_pwm = 0;
+    controller->output_pwm = 0;
+    controller->output_saturated = false;
+
     return true;
 }
 
@@ -156,24 +326,37 @@ int16_t WheelSpeedControl_Update(WheelSpeedController_t *controller,
         return 0;
     }
 
-    controller->measured_cps =
-        (int32_t)(((int64_t)delta_counts * 1000LL) /
-                  (int64_t)dt_ms);
+    WheelSpeed_UpdateMeasurement(controller, delta_counts, dt_ms);
 
     controller->error_cps =
         controller->target_cps - controller->measured_cps;
 
     if (controller->target_cps == 0)
     {
+        controller->feedforward_pwm = 0;
+        controller->proportional_pwm = 0;
         controller->integral_q10 = 0;
         controller->output_pwm = 0;
+        controller->output_saturated = false;
         return 0;
     }
+
+    controller->feedforward_pwm =
+        WheelSpeed_CalculateFeedforward(controller);
 
     p_q10 =
         (int64_t)controller->config.kp_q10 *
         (int64_t)controller->error_cps;
 
+    controller->proportional_pwm = WheelSpeed_ClampInt32(
+        p_q10 / WHEEL_SPEED_Q10_SCALE,
+        -32768,
+        32767);
+
+    /*
+     * Ki按标称控制周期定义。
+     * 实际周期偏离标称周期时，用dt_ms/nominal_period_ms补偿。
+     */
     integral_step_q10 =
         ((int64_t)controller->config.ki_q10 *
          (int64_t)controller->error_cps *
@@ -181,7 +364,7 @@ int16_t WheelSpeedControl_Update(WheelSpeedController_t *controller,
         (int64_t)controller->config.nominal_period_ms;
 
     integral_limit_q10 =
-        (int32_t)controller->config.pwm_limit *
+        (int32_t)controller->config.integral_limit_pwm *
         WHEEL_SPEED_Q10_SCALE;
 
     candidate_integral_q10 =
@@ -193,7 +376,12 @@ int16_t WheelSpeedControl_Update(WheelSpeedController_t *controller,
         -integral_limit_q10,
         integral_limit_q10);
 
-    sum_q10 = p_q10 + candidate_integral_q10;
+    sum_q10 =
+        ((int64_t)controller->feedforward_pwm *
+         WHEEL_SPEED_Q10_SCALE) +
+        p_q10 +
+        candidate_integral_q10;
+
     raw_pwm = sum_q10 / WHEEL_SPEED_Q10_SCALE;
 
     saturating_high =
@@ -206,7 +394,8 @@ int16_t WheelSpeedControl_Update(WheelSpeedController_t *controller,
 
     /*
      * 条件积分抗饱和：
-     * 只有当误差不会把输出继续推向同方向饱和时，才接收新积分值。
+     * 当误差继续把总输出推向同方向饱和时，拒绝本次积分增量；
+     * 当误差有助于退出饱和时，仍允许积分回退。
      */
     if ((!saturating_high) && (!saturating_low))
     {
@@ -215,17 +404,24 @@ int16_t WheelSpeedControl_Update(WheelSpeedController_t *controller,
     }
 
     sum_q10 =
-        p_q10 + (int64_t)controller->integral_q10;
+        ((int64_t)controller->feedforward_pwm *
+         WHEEL_SPEED_Q10_SCALE) +
+        p_q10 +
+        (int64_t)controller->integral_q10;
 
     raw_pwm = sum_q10 / WHEEL_SPEED_Q10_SCALE;
+
+    controller->output_saturated =
+        (raw_pwm > (int64_t)controller->config.pwm_limit) ||
+        (raw_pwm < -(int64_t)controller->config.pwm_limit);
 
     controller->output_pwm = WheelSpeed_ClampPwm(
         raw_pwm,
         controller->config.pwm_limit);
 
     /*
-     * 输出方向与目标方向保持一致。
-     * “允许反转”表示目标可为负，不表示正向目标超速时主动反打。
+     * 允许负目标实现倒车，但正目标超速时不主动反向驱动。
+     * 输出降到0时由bsp_motor执行短路刹车。
      */
     if (((controller->target_cps > 0) &&
          (controller->output_pwm < 0)) ||
@@ -254,6 +450,17 @@ int32_t WheelSpeedControl_GetTargetCps(
     return controller->target_cps;
 }
 
+int32_t WheelSpeedControl_GetRawMeasuredCps(
+    const WheelSpeedController_t *controller)
+{
+    if ((controller == NULL) || (!controller->initialized))
+    {
+        return 0;
+    }
+
+    return controller->raw_measured_cps;
+}
+
 int32_t WheelSpeedControl_GetMeasuredCps(
     const WheelSpeedController_t *controller)
 {
@@ -276,6 +483,39 @@ int32_t WheelSpeedControl_GetErrorCps(
     return controller->error_cps;
 }
 
+int16_t WheelSpeedControl_GetFeedforwardPwm(
+    const WheelSpeedController_t *controller)
+{
+    if ((controller == NULL) || (!controller->initialized))
+    {
+        return 0;
+    }
+
+    return controller->feedforward_pwm;
+}
+
+int32_t WheelSpeedControl_GetProportionalPwm(
+    const WheelSpeedController_t *controller)
+{
+    if ((controller == NULL) || (!controller->initialized))
+    {
+        return 0;
+    }
+
+    return controller->proportional_pwm;
+}
+
+int32_t WheelSpeedControl_GetIntegralPwm(
+    const WheelSpeedController_t *controller)
+{
+    if ((controller == NULL) || (!controller->initialized))
+    {
+        return 0;
+    }
+
+    return controller->integral_q10 / WHEEL_SPEED_Q10_SCALE;
+}
+
 int16_t WheelSpeedControl_GetOutputPwm(
     const WheelSpeedController_t *controller)
 {
@@ -285,4 +525,15 @@ int16_t WheelSpeedControl_GetOutputPwm(
     }
 
     return controller->output_pwm;
+}
+
+bool WheelSpeedControl_IsOutputSaturated(
+    const WheelSpeedController_t *controller)
+{
+    if ((controller == NULL) || (!controller->initialized))
+    {
+        return false;
+    }
+
+    return controller->output_saturated;
 }
