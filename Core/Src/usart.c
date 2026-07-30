@@ -212,7 +212,9 @@ void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
     HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
 
   /* USER CODE BEGIN USART6_MspInit 1 */
-
+    /* USART6 interrupt Init */
+    HAL_NVIC_SetPriority(USART6_IRQn, 2, 0);
+    HAL_NVIC_EnableIRQ(USART6_IRQn);
   /* USER CODE END USART6_MspInit 1 */
   }
 }

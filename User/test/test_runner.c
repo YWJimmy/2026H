@@ -23,6 +23,12 @@
 #elif PROJECT_TEST_MODE == TEST_MODE_ENCODER
 #include "test_encoder.h"
 
+#elif PROJECT_TEST_MODE == TEST_MODE_VISION_UART
+#include "test_vision_uart.h"
+
+#elif PROJECT_TEST_MODE == TEST_MODE_BALL_BALANCE
+#include "test_ball_balance.h"
+
 #else
 #error "Unsupported PROJECT_TEST_MODE"
 #endif
@@ -57,6 +63,14 @@ bool TestRunner_Init(void)
 #elif PROJECT_TEST_MODE == TEST_MODE_ENCODER
 
     return Test_Encoder_Init();
+
+#elif PROJECT_TEST_MODE == TEST_MODE_VISION_UART
+
+    return Test_VisionUart_Init();
+
+#elif PROJECT_TEST_MODE == TEST_MODE_BALL_BALANCE
+
+    return Test_BallBalance_Init();
 
 #else
 
@@ -96,6 +110,14 @@ void TestRunner_Update(void)
 
     Test_Encoder_Update();
 
+#elif PROJECT_TEST_MODE == TEST_MODE_VISION_UART
+
+    Test_VisionUart_Update();
+
+#elif PROJECT_TEST_MODE == TEST_MODE_BALL_BALANCE
+
+    Test_BallBalance_Update();
+
 #endif
 }
 
@@ -132,6 +154,14 @@ void TestRunner_Stop(void)
      * 当前编码器测试没有需要主动停止的输出。
      * 不驱动电机，仅保持编码器计数运行。
      */
+
+#elif PROJECT_TEST_MODE == TEST_MODE_VISION_UART
+
+    Test_VisionUart_Stop();
+
+#elif PROJECT_TEST_MODE == TEST_MODE_BALL_BALANCE
+
+    Test_BallBalance_Stop();
 
 #endif
 }

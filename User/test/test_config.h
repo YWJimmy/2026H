@@ -8,11 +8,13 @@
 #define TEST_MODE_WHEEL_SPEED           5U
 #define TEST_MODE_CHASSIS_STRAIGHT      6U
 #define TEST_MODE_ENCODER               7U
+#define TEST_MODE_VISION_UART           8U
+#define TEST_MODE_BALL_BALANCE          9U
 
 /*
- * 编码器独立测试：
- * 不驱动电机，手动转动车轮。
+ * 钢球平衡测试：
+ * 舵机初始 1600us，P 控制使小球稳定在 cx=500。
  */
-#define PROJECT_TEST_MODE               TEST_MODE_MOTOR_OPEN_LOOP
+#define PROJECT_TEST_MODE               TEST_MODE_BALL_BALANCE
 
 #endif /* TEST_CONFIG_H */
