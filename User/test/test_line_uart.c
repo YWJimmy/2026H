@@ -39,10 +39,15 @@ bool Test_LineUart_Init(void)
         "TEST,LINE_UART,START,PORT=UART4,TX=PC10,RX=PC11,"
         "BAUD=115200,MODE=0x00,QUERY=0x01,PERIOD_MS=%u\r\n",
         (unsigned int)BSP_LINE_UART_QUERY_PERIOD_MS);
-    (void)BSP_Debug_Printf(
-        "TEST,LINE_UART,NOTICE=RAW_ONLY,POWER_CYCLE_SENSOR_WITH_MCU,"
-        "POLARITY_AND_DIRECTION_UNCONFIRMED\r\n");
-
+    //(void)BSP_Debug_Printf(
+    //    "TEST,LINE_UART,NOTICE=RAW_ONLY,POWER_CYCLE_SENSOR_WITH_MCU,"
+    //    "POLARITY_AND_DIRECTION_UNCONFIRMED\r\n");
+		(void)BSP_Debug_Printf(
+				"TEST,LINE_UART,START,PORT=UART4,"
+				"TX=PC10,RX=PC11,BAUD=115200,"
+				"MODE=0x00,QUERY=0x01,PERIOD_MS=%u,"
+				"BLACK_LEVEL=1,ORDER=S1_TO_S8_L_TO_R\r\n",
+				(unsigned int)BSP_LINE_UART_QUERY_PERIOD_MS);
     return true;
 }
 

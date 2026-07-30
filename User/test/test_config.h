@@ -16,6 +16,6 @@
  * - 不解释黑白极性；
  * - 不假定 S1 位于左侧或右侧。
  */
-#define PROJECT_TEST_MODE               TEST_MODE_LINE_UART
+#define PROJECT_TEST_MODE               TEST_MODE_LINE_FOLLOW
 
 #endif /* TEST_CONFIG_H */

@@ -42,9 +42,11 @@
  * 为 0 时仍可读取 raw[]，但 valid_mask 固定为 0，
  * line_follow 会进入 INVALID，避免未确认配置时驱动车辆。
  */
-#define LINE_SENSOR_UART_CONFIG_CONFIRMED    0U
+/* 极性和安装方向均已实测确认。 */
+#define LINE_SENSOR_UART_CONFIG_CONFIRMED    1U
 
 /* 检测到黑线时模块原始位值：实测后设为 0U 或 1U。 */
+/* 黑线对应原始数字1，白底对应0。 */
 #define LINE_SENSOR_UART_BLACK_LEVEL         1U
 
 /*
@@ -53,6 +55,11 @@
  *
  * 若 S1 在最左：{0,1,2,3,4,5,6,7}
  * 若 S1 在最右：{7,6,5,4,3,2,1,0}
+ */
+ 
+ /*
+ * 逻辑通道0～7定义为车辆最左到最右。
+ * S1～S8本身就是从左到右，因此保持顺序。
  */
 #define LINE_SENSOR_UART_CHANNEL_MAP_INIT     \
 {                                             \
