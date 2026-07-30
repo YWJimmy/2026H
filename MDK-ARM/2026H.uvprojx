@@ -81,7 +81,7 @@
           </BeforeMake>
           <AfterMake>
             <RunUserProg1>0</RunUserProg1>
-            <RunUserProg2>1</RunUserProg2>
+            <RunUserProg2>0</RunUserProg2>
             <UserProg1Name></UserProg1Name>
             <UserProg2Name></UserProg2Name>
             <UserProg1Dos16Mode>0</UserProg1Dos16Mode>
@@ -337,7 +337,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../User/bsp;../User/test;../User/module</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../User/bsp;../User/test;..\User\module</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -417,11 +417,6 @@
               <FilePath>..\User\bsp\bsp_line_adc.c</FilePath>
             </File>
             <File>
-              <FileName>bsp_line_uart.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\User\bsp\bsp_line_uart.c</FilePath>
-            </File>
-            <File>
               <FileName>bsp_vision_uart.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\bsp\bsp_vision_uart.c</FilePath>
@@ -462,11 +457,6 @@
               <FilePath>..\User\test\test_line_sensor.c</FilePath>
             </File>
             <File>
-              <FileName>test_line_uart.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\User\test\test_line_uart.c</FilePath>
-            </File>
-            <File>
               <FileName>test_runner.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\test\test_runner.c</FilePath>
@@ -487,9 +477,9 @@
               <FilePath>..\User\test\test_wheel_speed.c</FilePath>
             </File>
             <File>
-              <FileName>test_vision_uart.c</FileName>
+              <FileName>test_ball_balance.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\User\test\test_vision_uart.c</FilePath>
+              <FilePath>..\User\test\test_ball_balance.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -731,16 +721,6 @@
               <FileName>wheel_speed_control.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\module\wheel_speed_control.c</FilePath>
-            </File>
-            <File>
-              <FileName>vision_protocol.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\User\module\vision_protocol.c</FilePath>
-            </File>
-            <File>
-              <FileName>vision.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\User\module\vision.c</FilePath>
             </File>
           </Files>
         </Group>
