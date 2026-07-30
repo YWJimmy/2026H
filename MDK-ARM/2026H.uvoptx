@@ -10,7 +10,7 @@
     <aExt>*.s*; *.src; *.a*</aExt>
     <oExt>*.obj; *.o</oExt>
     <lExt>*.lib</lExt>
-    <tExt>*.txt; *.h; *.inc; *.md</tExt>
+    <tExt>*.txt; *.h; *.inc</tExt>
     <pExt>*.plm</pExt>
     <CppX>*.cpp</CppX>
     <nMigrate>0</nMigrate>
@@ -26,7 +26,7 @@
     <ToolsetNumber>0x4</ToolsetNumber>
     <ToolsetName>ARM-ADS</ToolsetName>
     <TargetOption>
-      <CLKADS>8000000</CLKADS>
+      <CLKADS>25000000</CLKADS>
       <OPTTT>
         <gFlags>1</gFlags>
         <BeepAtEnd>1</BeepAtEnd>
@@ -93,7 +93,7 @@
         <tRbreak>1</tRbreak>
         <tRwatch>1</tRwatch>
         <tRmem>1</tRmem>
-        <tRfunc>1</tRfunc>
+        <tRfunc>0</tRfunc>
         <tRbox>1</tRbox>
         <tRtrace>1</tRtrace>
         <sRSysVw>1</sRSysVw>
@@ -119,18 +119,8 @@
       <TargetDriverDllRegistry>
         <SetRegEntry>
           <Number>0</Number>
-          <Key>CMSIS_AGDI</Key>
-          <Name>-X"ATK-MIN-HS-WINUSB-CMSIS-DAP" -UATK 20230720 -O206 -S8 -C0 -P00000000 -N00("ARM CoreSight SW-DP") -D00(2BA01477) -L00(0) -TO65554 -TC10000000 -TT10000000 -TP20 -TDS8007 -TDT0 -TDC1F -TIEFFFFFFFF -TIP8 -FO15 -FD20000000 -FC1000 -FN1 -FF0STM32F4xx_1024.FLM -FS08000000 -FL0100000 -FP0($$Device:STM32F407ZGTx$CMSIS\Flash\STM32F4xx_1024.FLM)</Name>
-        </SetRegEntry>
-        <SetRegEntry>
-          <Number>0</Number>
           <Key>UL2CM3</Key>
           <Name>UL2CM3(-S0 -C0 -P0 -FD20000000 -FC1000 -FN1 -FF0STM32F4xx_1024 -FS08000000 -FL0100000 -FP0($$Device:STM32F407ZGTx$CMSIS\Flash\STM32F4xx_1024.FLM))</Name>
-        </SetRegEntry>
-        <SetRegEntry>
-          <Number>0</Number>
-          <Key>ST-LINKIII-KEIL_SWO</Key>
-          <Name>-U-O142 -O2254 -S0 -C0 -N00("ARM CoreSight SW-DP") -D00(2BA01477) -L00(0) -TO18 -TC10000000 -TP21 -TDS8007 -TDT0 -TDC1F -TIEFFFFFFFF -TIP8 -FO7 -FD20000000 -FC800 -FN1 -FF0STM32F4xx_1024.FLM -FS08000000 -FL0100000 -FP0($$Device:STM32F407ZGTx$CMSIS\Flash\STM32F4xx_1024.FLM)</Name>
         </SetRegEntry>
       </TargetDriverDllRegistry>
       <Breakpoint/>
@@ -139,7 +129,7 @@
       </Tracepoint>
       <DebugFlag>
         <trace>0</trace>
-        <periodic>1</periodic>
+        <periodic>0</periodic>
         <aLwin>0</aLwin>
         <aCover>0</aCover>
         <aSer1>0</aSer1>
@@ -187,7 +177,7 @@
 
   <Group>
     <GroupName>Application/MDK-ARM</GroupName>
-    <tvExp>1</tvExp>
+    <tvExp>0</tvExp>
     <tvExpOptDlg>0</tvExpOptDlg>
     <cbSel>0</cbSel>
     <RteFlg>0</RteFlg>
@@ -278,13 +268,20 @@
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
       <bDave2>0</bDave2>
-<<<<<<< Updated upstream
-      <PathWithFileName>..\User\bsp\bsp_line_uart.c</PathWithFileName>
-      <FilenameWithoutPath>bsp_line_uart.c</FilenameWithoutPath>
-=======
       <PathWithFileName>..\User\bsp\bsp_vision_uart.c</PathWithFileName>
       <FilenameWithoutPath>bsp_vision_uart.c</FilenameWithoutPath>
->>>>>>> Stashed changes
+      <RteFlg>0</RteFlg>
+      <bShared>0</bShared>
+    </File>
+    <File>
+      <GroupNumber>2</GroupNumber>
+      <FileNumber>8</FileNumber>
+      <FileType>1</FileType>
+      <tvExp>0</tvExp>
+      <tvExpOptDlg>0</tvExpOptDlg>
+      <bDave2>0</bDave2>
+      <PathWithFileName>..\User\bsp\bsp_line_uart.c</PathWithFileName>
+      <FilenameWithoutPath>bsp_line_uart.c</FilenameWithoutPath>
       <RteFlg>0</RteFlg>
       <bShared>0</bShared>
     </File>
@@ -298,7 +295,7 @@
     <RteFlg>0</RteFlg>
     <File>
       <GroupNumber>3</GroupNumber>
-      <FileNumber>8</FileNumber>
+      <FileNumber>9</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -310,7 +307,7 @@
     </File>
     <File>
       <GroupNumber>3</GroupNumber>
-      <FileNumber>9</FileNumber>
+      <FileNumber>10</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -322,9 +319,7 @@
     </File>
     <File>
       <GroupNumber>3</GroupNumber>
-      <FileNumber>10</FileNumber>
-<<<<<<< Updated upstream
-=======
+      <FileNumber>11</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -336,8 +331,7 @@
     </File>
     <File>
       <GroupNumber>3</GroupNumber>
-      <FileNumber>11</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>12</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -349,11 +343,7 @@
     </File>
     <File>
       <GroupNumber>3</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>11</FileNumber>
-=======
-      <FileNumber>12</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>13</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -365,11 +355,7 @@
     </File>
     <File>
       <GroupNumber>3</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>12</FileNumber>
-=======
-      <FileNumber>13</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>14</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -381,27 +367,9 @@
     </File>
     <File>
       <GroupNumber>3</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>13</FileNumber>
+      <FileNumber>15</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
-      <tvExpOptDlg>0</tvExpOptDlg>
-      <bDave2>0</bDave2>
-      <PathWithFileName>..\User\test\test_line_uart.c</PathWithFileName>
-      <FilenameWithoutPath>test_line_uart.c</FilenameWithoutPath>
-      <RteFlg>0</RteFlg>
-      <bShared>0</bShared>
-    </File>
-    <File>
-      <GroupNumber>3</GroupNumber>
-      <FileNumber>14</FileNumber>
-      <FileType>1</FileType>
-      <tvExp>0</tvExp>
-=======
-      <FileNumber>14</FileNumber>
-      <FileType>1</FileType>
-      <tvExp>0</tvExp>
->>>>>>> Stashed changes
       <tvExpOptDlg>0</tvExpOptDlg>
       <bDave2>0</bDave2>
       <PathWithFileName>..\User\test\test_runner.c</PathWithFileName>
@@ -411,7 +379,7 @@
     </File>
     <File>
       <GroupNumber>3</GroupNumber>
-      <FileNumber>15</FileNumber>
+      <FileNumber>16</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -423,7 +391,7 @@
     </File>
     <File>
       <GroupNumber>3</GroupNumber>
-      <FileNumber>16</FileNumber>
+      <FileNumber>17</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -435,7 +403,7 @@
     </File>
     <File>
       <GroupNumber>3</GroupNumber>
-      <FileNumber>17</FileNumber>
+      <FileNumber>18</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -447,7 +415,7 @@
     </File>
     <File>
       <GroupNumber>3</GroupNumber>
-      <FileNumber>18</FileNumber>
+      <FileNumber>19</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -461,17 +429,13 @@
 
   <Group>
     <GroupName>Application/User/Core</GroupName>
-    <tvExp>1</tvExp>
+    <tvExp>0</tvExp>
     <tvExpOptDlg>0</tvExpOptDlg>
     <cbSel>0</cbSel>
     <RteFlg>0</RteFlg>
     <File>
       <GroupNumber>4</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>18</FileNumber>
-=======
-      <FileNumber>19</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>20</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -483,11 +447,7 @@
     </File>
     <File>
       <GroupNumber>4</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>19</FileNumber>
-=======
-      <FileNumber>20</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>21</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -499,11 +459,7 @@
     </File>
     <File>
       <GroupNumber>4</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>20</FileNumber>
-=======
-      <FileNumber>21</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>22</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -515,11 +471,7 @@
     </File>
     <File>
       <GroupNumber>4</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>21</FileNumber>
-=======
-      <FileNumber>22</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>23</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -531,11 +483,7 @@
     </File>
     <File>
       <GroupNumber>4</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>22</FileNumber>
-=======
-      <FileNumber>23</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>24</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -547,11 +495,7 @@
     </File>
     <File>
       <GroupNumber>4</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>23</FileNumber>
-=======
-      <FileNumber>24</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>25</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -563,11 +507,7 @@
     </File>
     <File>
       <GroupNumber>4</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>24</FileNumber>
-=======
-      <FileNumber>25</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>26</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -579,11 +519,7 @@
     </File>
     <File>
       <GroupNumber>4</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>25</FileNumber>
-=======
-      <FileNumber>26</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>27</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -595,11 +531,7 @@
     </File>
     <File>
       <GroupNumber>4</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>26</FileNumber>
-=======
-      <FileNumber>27</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>28</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -613,17 +545,13 @@
 
   <Group>
     <GroupName>Drivers/STM32F4xx_HAL_Driver</GroupName>
-    <tvExp>1</tvExp>
+    <tvExp>0</tvExp>
     <tvExpOptDlg>0</tvExpOptDlg>
     <cbSel>0</cbSel>
     <RteFlg>0</RteFlg>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>27</FileNumber>
-=======
-      <FileNumber>28</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>29</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -635,11 +563,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>28</FileNumber>
-=======
-      <FileNumber>29</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>30</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -651,11 +575,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>29</FileNumber>
-=======
-      <FileNumber>30</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>31</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -667,11 +587,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>30</FileNumber>
-=======
-      <FileNumber>31</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>32</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -683,11 +599,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>31</FileNumber>
-=======
-      <FileNumber>32</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>33</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -699,11 +611,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>32</FileNumber>
-=======
-      <FileNumber>33</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>34</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -715,11 +623,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>33</FileNumber>
-=======
-      <FileNumber>34</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>35</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -731,11 +635,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>34</FileNumber>
-=======
-      <FileNumber>35</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>36</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -747,11 +647,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>35</FileNumber>
-=======
-      <FileNumber>36</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>37</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -763,11 +659,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>36</FileNumber>
-=======
-      <FileNumber>37</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>38</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -779,11 +671,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>37</FileNumber>
-=======
-      <FileNumber>38</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>39</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -795,11 +683,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>38</FileNumber>
-=======
-      <FileNumber>39</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>40</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -811,11 +695,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>39</FileNumber>
-=======
-      <FileNumber>40</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>41</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -827,11 +707,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>40</FileNumber>
-=======
-      <FileNumber>41</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>42</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -843,11 +719,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>41</FileNumber>
-=======
-      <FileNumber>42</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>43</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -859,11 +731,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>42</FileNumber>
-=======
-      <FileNumber>43</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>44</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -875,11 +743,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>43</FileNumber>
-=======
-      <FileNumber>44</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>45</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -891,11 +755,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>44</FileNumber>
-=======
-      <FileNumber>45</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>46</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -907,11 +767,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>45</FileNumber>
-=======
-      <FileNumber>46</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>47</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -923,11 +779,7 @@
     </File>
     <File>
       <GroupNumber>5</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>46</FileNumber>
-=======
-      <FileNumber>47</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>48</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -941,17 +793,13 @@
 
   <Group>
     <GroupName>Drivers/CMSIS</GroupName>
-    <tvExp>1</tvExp>
+    <tvExp>0</tvExp>
     <tvExpOptDlg>0</tvExpOptDlg>
     <cbSel>0</cbSel>
     <RteFlg>0</RteFlg>
     <File>
       <GroupNumber>6</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>47</FileNumber>
-=======
-      <FileNumber>48</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>49</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -965,17 +813,13 @@
 
   <Group>
     <GroupName>User/module</GroupName>
-    <tvExp>1</tvExp>
+    <tvExp>0</tvExp>
     <tvExpOptDlg>0</tvExpOptDlg>
     <cbSel>0</cbSel>
     <RteFlg>0</RteFlg>
     <File>
       <GroupNumber>7</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>48</FileNumber>
-=======
-      <FileNumber>49</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>50</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -987,11 +831,7 @@
     </File>
     <File>
       <GroupNumber>7</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>49</FileNumber>
-=======
-      <FileNumber>50</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>51</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -1003,11 +843,7 @@
     </File>
     <File>
       <GroupNumber>7</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>50</FileNumber>
-=======
-      <FileNumber>51</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>52</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
@@ -1019,11 +855,7 @@
     </File>
     <File>
       <GroupNumber>7</GroupNumber>
-<<<<<<< Updated upstream
-      <FileNumber>51</FileNumber>
-=======
-      <FileNumber>52</FileNumber>
->>>>>>> Stashed changes
+      <FileNumber>53</FileNumber>
       <FileType>1</FileType>
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
