@@ -22,16 +22,26 @@
 #define SERVO_MAX_US            1800U
 
 /*
- * P-controller gain: pulse_us change per pixel of error.
- * With cx range ~185..1173, max error from target 500 is ~685 px.
- * At Kp=0.25, max correction = ~171 us, staying well within limits.
+ * PI-controller gains.
+ *   delta_us = Kp * error + Ki * integral
  */
-#define BALL_KP                 0.75f
+#define BALL_KP                 1.0f
+#define BALL_KI                 0.005f
 
 /*
- * Dead zone: if |error| <= this, hold current servo position.
+ * Integral anti-windup: clamp integral to +/- this value.
  */
-#define BALL_DEADZONE_PX        10
+#define BALL_INTEGRAL_MAX       4000.0f
+
+/*
+ * Dead zone: |error| <= 30 → ball within 470..530, hold position.
+ */
+#define BALL_DEADZONE_PX        30
+
+/*
+ * Minimum step size (us) on total delta.
+ */
+#define BALL_MIN_STEP_US        20U
 
 /*
  * Print period (ms) and heartbeat period (ms).
@@ -53,6 +63,8 @@ static uint32_t s_last_heartbeat_ms  = 0U;
 static uint32_t s_lost_frames        = 0U;
 static int32_t  s_last_cx            = 0;
 static int32_t  s_last_error         = 0;
+static int32_t  s_prev_error         = 0;
+static float    s_integral           = 0.0f;
 static bool     s_has_target         = false;
 
 static uint16_t Servo_ClampPulse(int32_t raw)
@@ -67,9 +79,11 @@ bool Test_BallBalance_Init(void)
     s_initialized   = false;
     s_vision_ok     = false;
     s_servo_pulse   = (float)SERVO_CENTER_US;
-    s_last_print_ms = 0U;
+    s_last_print_ms     = 0U;
     s_last_heartbeat_ms = 0U;
-    s_lost_frames   = 0U;
+    s_lost_frames       = 0U;
+    s_integral          = 0.0f;
+    s_prev_error        = 0;
 
     if (!BSP_DebugUart_Init())
     {
@@ -79,12 +93,13 @@ bool Test_BallBalance_Init(void)
     (void)BSP_Debug_Printf(
         "BALL_BAL,START,TARGET_CX=%d,"
         "SERVO_CENTER=%u,SERVO_MIN=%u,SERVO_MAX=%u,"
-        "KP=%.2f,DEADZONE=%d\r\n",
+        "KP=%.2f,KI=%.3f,DEADZONE=%d\r\n",
         BALL_TARGET_CX,
         (unsigned int)SERVO_CENTER_US,
         (unsigned int)SERVO_MIN_US,
         (unsigned int)SERVO_MAX_US,
         (double)BALL_KP,
+        (double)BALL_KI,
         BALL_DEADZONE_PX);
 
     /* Init servo at center position before enabling */
@@ -159,8 +174,41 @@ void Test_BallBalance_Update(void)
 
             if (abs(s_last_error) > BALL_DEADZONE_PX)
             {
-                raw_pulse = (int32_t)(
-                    (float)SERVO_CENTER_US + BALL_KP * (float)s_last_error);
+                int32_t delta;
+
+                /* Reset integral on error sign change (crossed target) */
+                if ((s_last_error > 0 && s_prev_error < 0) ||
+                    (s_last_error < 0 && s_prev_error > 0))
+                {
+                    s_integral = 0.0f;
+                }
+
+                /* Accumulate integral with anti-windup */
+                s_integral += (float)s_last_error;
+                if (s_integral > BALL_INTEGRAL_MAX)
+                {
+                    s_integral = BALL_INTEGRAL_MAX;
+                }
+                else if (s_integral < -BALL_INTEGRAL_MAX)
+                {
+                    s_integral = -BALL_INTEGRAL_MAX;
+                }
+
+                delta = (int32_t)(
+                    BALL_KP * (float)s_last_error +
+                    BALL_KI * s_integral);
+
+                /* Minimum step */
+                if ((delta > 0) && (delta < (int32_t)BALL_MIN_STEP_US))
+                {
+                    delta = (int32_t)BALL_MIN_STEP_US;
+                }
+                else if ((delta < 0) && (delta > -(int32_t)BALL_MIN_STEP_US))
+                {
+                    delta = -(int32_t)BALL_MIN_STEP_US;
+                }
+
+                raw_pulse = (int32_t)SERVO_CENTER_US + delta;
                 clamped_pulse = Servo_ClampPulse(raw_pulse);
 
                 if (clamped_pulse != (uint16_t)s_servo_pulse)
@@ -170,6 +218,14 @@ void Test_BallBalance_Update(void)
                         s_servo_pulse = (float)clamped_pulse;
                     }
                 }
+
+                s_prev_error = s_last_error;
+            }
+            else
+            {
+                /* In dead zone: stop accumulating, hold position */
+                s_integral   = 0.0f;
+                s_prev_error = 0;
             }
         }
         else
@@ -213,9 +269,10 @@ void Test_BallBalance_Update(void)
         if (s_has_target)
         {
             (void)BSP_Debug_Printf(
-                "BALL_BAL,CX=%ld,ERROR=%ld,PULSE=%u\r\n",
+                "BALL_BAL,CX=%ld,ERROR=%ld,INT=%ld,PULSE=%u\r\n",
                 (long)s_last_cx,
                 (long)s_last_error,
+                (long)s_integral,
                 (unsigned int)s_servo_pulse);
         }
         else
