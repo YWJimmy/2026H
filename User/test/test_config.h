@@ -12,11 +12,10 @@
 #define TEST_MODE_VISION_UART           9U
 
 /*
- * K230D 视觉串口安全测试：
- * - 不驱动电机；
- * - 接收并解析 SB 帧；
- * - 通过 USART1 调试串口输出通信统计。
+ * 默认保留远端已确认的巡线闭环模式。
+ * 验证 K230D 通信时切换为 TEST_MODE_VISION_UART；该模式不驱动电机，
+ * 接收并解析 SB 帧，并通过 USART1 输出通信统计。
  */
-#define PROJECT_TEST_MODE               TEST_MODE_VISION_UART
+#define PROJECT_TEST_MODE               TEST_MODE_LINE_FOLLOW
 
 #endif /* TEST_CONFIG_H */

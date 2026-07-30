@@ -50,7 +50,7 @@
 
 - [x] **Step 1: 新增模式**：`TEST_MODE_VISION_UART` 初始化视觉接收但不驱动电机。
 - [x] **Step 2: 输出诊断**：周期打印 `found/cx/cy/score/age/rx/overflow/valid/invalid/error`，便于实机确认通信。
-- [x] **Step 3: 设为默认**：默认进入视觉 UART 安全测试。
+- [x] **Step 3: 提供安全入口**：视觉 UART 模式可独立启用；合并远端巡线更新后，仓库默认模式遵循最新 `main`，保持 `TEST_MODE_LINE_FOLLOW`。
 
 ### Task 4: K230D UART1 发送
 

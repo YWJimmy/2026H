@@ -459,6 +459,11 @@
               <FilePath>..\User\test\test_line_sensor.c</FilePath>
             </File>
             <File>
+              <FileName>test_line_uart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\test\test_line_uart.c</FilePath>
+            </File>
+            <File>
               <FileName>test_runner.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\test\test_runner.c</FilePath>
@@ -477,11 +482,6 @@
               <FileName>test_wheel_speed.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\test\test_wheel_speed.c</FilePath>
-            </File>
-            <File>
-              <FileName>test_line_uart.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\User\test\test_line_uart.c</FilePath>
             </File>
             <File>
               <FileName>test_vision_uart.c</FileName>

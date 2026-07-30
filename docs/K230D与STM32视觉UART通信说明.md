@@ -49,8 +49,9 @@ STM32 解析器会拒绝字段数错误、非数字、越界坐标、中心不�
 - STM32 最新结果管理：`User/module/vision.c`
 - STM32 安全测试：`User/test/test_vision_uart.c`
 
-当前 `PROJECT_TEST_MODE` 已设为 `TEST_MODE_VISION_UART`。该模式不驱动电机，
-通过 USART1 调试口每 100 ms 输出一行 `VU,...` 状态。主要字段：
+需要验证通信时，将 `PROJECT_TEST_MODE` 临时设为 `TEST_MODE_VISION_UART`。
+该模式不驱动电机，并通过 USART1 调试口每 100 ms 输出一行 `VU,...` 状态。
+合并远端巡线更新后，仓库默认保持 `TEST_MODE_LINE_FOLLOW`。主要字段：
 
 - `SEQ`：已解析有效帧序号；持续增加说明链路和解析都正常。
 - `FOUND/CX/CY/SCORE`：最新协议帧数据。
