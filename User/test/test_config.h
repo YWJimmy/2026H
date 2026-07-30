@@ -11,22 +11,21 @@
  */
 #define TEST_MODE_WHEEL_SPEED_MMPS          5U
 #define TEST_MODE_WHEEL_SPEED               TEST_MODE_WHEEL_SPEED_MMPS
-
 #define TEST_MODE_CHASSIS_STRAIGHT          6U
 #define TEST_MODE_ENCODER                   7U
 #define TEST_MODE_LINE_UART                 8U
 #define TEST_MODE_VISION_UART               9U
 #define TEST_MODE_WHEEL_SPEED_CPS           10U
+#define TEST_MODE_LINE_FOLLOW_DRIVE         11U
 
 /*
- * 当前继续进行轮速PI闭环V2的mm/s阶跃测试。
- *
- * 常用切换：
- * TEST_MODE_LINE_FOLLOW       UART4八路巡线分析/闭环测试
- * TEST_MODE_LINE_UART         UART4八路巡线原始通信测试
- * TEST_MODE_VISION_UART       USART6 K230D视觉通信测试
- * TEST_MODE_WHEEL_SPEED_CPS   count/s单位轮速闭环测试
+ * 实际巡线驾驶测试：
+ * - 上电后电机保持不动；
+ * - 第一次按PG15开始巡线；
+ * - 第二次按PG15立即短路刹车停止；
+ * - INVALID、丢线超时、全黑超时会自动停止；
+ * - 自动停止后再次按PG15可重新开始。
  */
-#define PROJECT_TEST_MODE                   TEST_MODE_WHEEL_SPEED_MMPS
+#define PROJECT_TEST_MODE                   TEST_MODE_LINE_FOLLOW_DRIVE
 
 #endif /* TEST_CONFIG_H */

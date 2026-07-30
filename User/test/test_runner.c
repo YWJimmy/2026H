@@ -30,6 +30,9 @@
 #elif PROJECT_TEST_MODE == TEST_MODE_VISION_UART
 #include "test_vision_uart.h"
 
+#elif PROJECT_TEST_MODE == TEST_MODE_LINE_FOLLOW_DRIVE
+#include "test_line_follow_drive.h"
+
 #else
 #error "Unsupported PROJECT_TEST_MODE"
 #endif
@@ -55,6 +58,8 @@ bool TestRunner_Init(void)
     return Test_LineUart_Init();
 #elif PROJECT_TEST_MODE == TEST_MODE_VISION_UART
     return Test_VisionUart_Init();
+#elif PROJECT_TEST_MODE == TEST_MODE_LINE_FOLLOW_DRIVE
+    return Test_LineFollowDrive_Init();
 #else
     return false;
 #endif
@@ -81,6 +86,8 @@ void TestRunner_Update(void)
     Test_LineUart_Update();
 #elif PROJECT_TEST_MODE == TEST_MODE_VISION_UART
     Test_VisionUart_Update();
+#elif PROJECT_TEST_MODE == TEST_MODE_LINE_FOLLOW_DRIVE
+    Test_LineFollowDrive_Update();
 #endif
 }
 
@@ -105,5 +112,7 @@ void TestRunner_Stop(void)
     Test_LineUart_Stop();
 #elif PROJECT_TEST_MODE == TEST_MODE_VISION_UART
     Test_VisionUart_Stop();
+#elif PROJECT_TEST_MODE == TEST_MODE_LINE_FOLLOW_DRIVE
+    Test_LineFollowDrive_Stop();
 #endif
 }

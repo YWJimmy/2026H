@@ -1,0 +1,184 @@
+# 实际巡线驾驶 V1 设计与测试
+
+## 1. 控制链路
+
+```text
+bsp_line_uart
+→ line_sensor
+→ line_follow
+→ line_follow_control
+→ chassis
+→ wheel_speed_control
+→ bsp_motor
+```
+
+现有 `line_follow` 保持不变，新增的 `line_follow_control` 只负责把位置误差转换为左右轮目标速度。
+
+## 2. NORMAL状态
+
+位置误差约定：
+
+```text
+ERR < 0：线在车辆左侧，需要左转
+ERR > 0：线在车辆右侧，需要右转
+```
+
+差速方向：
+
+```text
+ERR > 0：
+左轮加速，右轮减速
+
+ERR < 0：
+左轮减速，右轮加速
+```
+
+控制器：
+
+```text
+correction = Kp × error + Kd × (error - previous_error)
+```
+
+使用Q10整数：
+
+```text
+Kp = 40 / 1024
+Kd = 16 / 1024
+```
+
+基础速度随误差线性降低：
+
+```text
+|ERR| = 0     → 250 mm/s
+|ERR| = 7000  → 120 mm/s
+```
+
+最终轮速强制限制：
+
+```text
+0～300 mm/s
+```
+
+不会产生反向目标。
+
+## 3. LOST状态
+
+只有曾经获得过非零正常误差方向后，才允许搜索：
+
+```text
+最后线在右侧：
+左轮160，右轮0 mm/s
+
+最后线在左侧：
+左轮0，右轮160 mm/s
+```
+
+超过300 ms仍未恢复：
+
+```text
+目标清零
+清PI
+短路刹车
+停止本次巡线
+```
+
+若启动后尚未获得可用方向就直接丢线，立即停止，避免盲目转向。
+
+## 4. ALL_BLACK状态
+
+```text
+0～200 ms：
+左右轮150 mm/s直行
+
+超过200 ms：
+短路刹车并停止
+```
+
+第一版将短时全黑视为十字线或较宽黑带，不做路线选择。
+
+## 5. INVALID状态
+
+任意无效帧立即：
+
+```text
+目标清零
+清PI
+短路刹车
+停止本次巡线
+```
+
+不会继续使用旧误差。
+
+## 6. START_KEY
+
+PG15为上拉、下降沿、低电平按下。
+
+测试代码采用30 ms主循环非阻塞消抖，不依赖新增HAL EXTI回调：
+
+```text
+第一次按下：开始
+第二次按下：停止
+自动停止后再次按下：重新开始
+```
+
+## 7. 串口日志
+
+控制层：
+
+```text
+LFD,R=1,M=NORMAL,X=NONE,LS=NORMAL,MASK=0x18,
+E=0,DE=0,B=250,C=0,T=250/250,AGE=0
+```
+
+底盘层：
+
+```text
+LFC,S=100,TM=250/250,MM=240/245,
+PWM=1800/1850,D=9/9,V=1,OVR=0
+```
+
+字段：
+
+```text
+R      运行状态
+M      控制模式
+X      停止原因
+LS     line_follow状态
+MASK   八路黑线掩码
+E      当前误差
+DE     误差变化量
+B      基础速度
+C      差速修正
+T      左/右目标mm/s
+MM     左/右实测mm/s
+PWM    左/右PWM
+D      左/右本周期编码器增量
+V      编码器样本有效
+OVR    底盘严重调度超时次数
+```
+
+## 8. 首次实测顺序
+
+1. 架空车轮，确认按键开始和停止有效。
+2. 手动移动黑线，检查ERR左右符号和左右轮差速方向。
+3. 确认任何目标轮速均不小于0。
+4. 落地时先使用低电压或限制活动区域。
+5. 先测试直线和缓弯，再测试急弯。
+6. 记录日志后再调整Kp、Kd和速度。
+
+## 9. 参数调整位置
+
+```text
+User/module/line_follow_control_config.h
+```
+
+第一轮只建议调整：
+
+```text
+LINE_FOLLOW_CONTROL_KP_Q10
+LINE_FOLLOW_CONTROL_KD_Q10
+LINE_FOLLOW_CONTROL_CENTER_SPEED_MM_S
+LINE_FOLLOW_CONTROL_MIN_BASE_SPEED_MM_S
+```
+
+不要同时修改底盘轮速PI和巡线外环参数。

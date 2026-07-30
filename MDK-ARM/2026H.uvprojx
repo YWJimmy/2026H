@@ -488,6 +488,11 @@
               <FileType>1</FileType>
               <FilePath>..\User\test\test_vision_uart.c</FilePath>
             </File>
+            <File>
+              <FileName>test_line_follow_drive.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\test\test_line_follow_drive.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -709,6 +714,11 @@
         <Group>
           <GroupName>User/module</GroupName>
           <Files>
+            <File>
+              <FileName>line_follow_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\module\line_follow_control.c</FilePath>
+            </File>
             <File>
               <FileName>line_follow.c</FileName>
               <FileType>1</FileType>
