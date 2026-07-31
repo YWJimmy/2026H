@@ -20,6 +20,8 @@ static uint8_t s_error_history_count = 0U;
 static uint8_t s_error_history_index = 0U;
 static int8_t s_last_search_direction = 0;
 static int32_t s_correction_ramped_mm_s = 0;
+static int32_t s_base_speed_ramped_mm_s =
+    LINE_FOLLOW_CONTROL_CENTER_SPEED_MM_S;
 static int32_t s_center_speed_mm_s =
     LINE_FOLLOW_CONTROL_CENTER_SPEED_MM_S;
 static int32_t s_min_base_speed_mm_s =
@@ -233,6 +235,36 @@ static int32_t LineFollowControl_GetCorrectionStep(uint32_t dt_ms)
     return (int32_t)step;
 }
 
+static int32_t LineFollowControl_GetBaseSpeedStep(
+    int32_t current_mm_s,
+    int32_t target_mm_s,
+    uint32_t dt_ms)
+{
+    int32_t slew_mm_s2 =
+        (target_mm_s >= current_mm_s) ?
+            LINE_FOLLOW_CONTROL_BASE_ACCEL_SLEW_MM_S2 :
+            LINE_FOLLOW_CONTROL_BASE_DECEL_SLEW_MM_S2;
+    int64_t step;
+
+    if (dt_ms == 0U)
+    {
+        dt_ms = 1U;
+    }
+
+    step = ((int64_t)slew_mm_s2 * (int64_t)dt_ms + 999LL) /
+           1000LL;
+    if (step < 1LL)
+    {
+        step = 1LL;
+    }
+    if (step > INT32_MAX)
+    {
+        return INT32_MAX;
+    }
+
+    return (int32_t)step;
+}
+
 static bool LineFollowControl_SetBaseTurnTargets(
     int32_t base_mm_s,
     int32_t turn_mm_s)
@@ -324,7 +356,8 @@ static bool LineFollowControl_HandleNormal(
     uint32_t now_ms)
 {
     int16_t filtered_error;
-    int32_t base_speed;
+    int32_t base_speed_target;
+    int32_t base_speed_step;
     int32_t correction_target;
     int32_t p_term;
     int32_t d_term;
@@ -351,8 +384,6 @@ static bool LineFollowControl_HandleNormal(
             LINE_FOLLOW_CONTROL_MODE_NORMAL,
             now_ms);
     }
-
-    base_speed = LineFollowControl_GetBaseSpeed(filtered_error);
 
     if (s_has_previous_normal_error)
     {
@@ -383,22 +414,6 @@ static bool LineFollowControl_HandleNormal(
         -LINE_FOLLOW_CONTROL_MAX_CORRECTION_MM_S,
         LINE_FOLLOW_CONTROL_MAX_CORRECTION_MM_S);
 
-    max_correction_by_base =
-        LINE_FOLLOW_CONTROL_MAX_WHEEL_SPEED_MM_S - base_speed;
-    if (base_speed < max_correction_by_base)
-    {
-        max_correction_by_base = base_speed;
-    }
-    if (max_correction_by_base < 0)
-    {
-        max_correction_by_base = 0;
-    }
-
-    correction_target = LineFollowControl_ClampI32(
-        correction_target,
-        -max_correction_by_base,
-        max_correction_by_base);
-
     if (s_last_normal_update_ms == 0U)
     {
         dt_ms = 5U;
@@ -412,6 +427,34 @@ static bool LineFollowControl_HandleNormal(
         }
     }
     s_last_normal_update_ms = now_ms;
+
+    base_speed_target =
+        LineFollowControl_GetBaseSpeed(filtered_error);
+    base_speed_step = LineFollowControl_GetBaseSpeedStep(
+        s_base_speed_ramped_mm_s,
+        base_speed_target,
+        dt_ms);
+    s_base_speed_ramped_mm_s = LineFollowControl_ApproachI32(
+        s_base_speed_ramped_mm_s,
+        base_speed_target,
+        base_speed_step);
+
+    max_correction_by_base =
+        LINE_FOLLOW_CONTROL_MAX_WHEEL_SPEED_MM_S -
+        s_base_speed_ramped_mm_s;
+    if (s_base_speed_ramped_mm_s < max_correction_by_base)
+    {
+        max_correction_by_base = s_base_speed_ramped_mm_s;
+    }
+    if (max_correction_by_base < 0)
+    {
+        max_correction_by_base = 0;
+    }
+
+    correction_target = LineFollowControl_ClampI32(
+        correction_target,
+        -max_correction_by_base,
+        max_correction_by_base);
 
     correction_step = LineFollowControl_GetCorrectionStep(dt_ms);
     s_correction_ramped_mm_s = LineFollowControl_ApproachI32(
@@ -433,7 +476,7 @@ static bool LineFollowControl_HandleNormal(
         s_has_normal_direction = true;
     }
 
-    s_status.base_speed_mm_s = base_speed;
+    s_status.base_speed_mm_s = s_base_speed_ramped_mm_s;
     s_status.correction_target_mm_s = correction_target;
     s_status.correction_mm_s = s_correction_ramped_mm_s;
     s_status.error_delta =
@@ -445,7 +488,7 @@ static bool LineFollowControl_HandleNormal(
     s_status.has_normal_direction = s_has_normal_direction;
 
     return LineFollowControl_SetBaseTurnTargets(
-        base_speed,
+        s_base_speed_ramped_mm_s,
         s_correction_ramped_mm_s);
 }
 
@@ -530,6 +573,8 @@ bool LineFollowControl_Init(void)
     s_previous_normal_error = 0;
     s_last_search_direction = 0;
     s_correction_ramped_mm_s = 0;
+    s_base_speed_ramped_mm_s =
+        LINE_FOLLOW_CONTROL_CENTER_SPEED_MM_S;
     s_center_speed_mm_s =
         LINE_FOLLOW_CONTROL_CENTER_SPEED_MM_S;
     s_min_base_speed_mm_s =
@@ -583,6 +628,7 @@ bool LineFollowControl_Start(void)
     s_previous_normal_error = 0;
     s_last_search_direction = 0;
     s_correction_ramped_mm_s = 0;
+    s_base_speed_ramped_mm_s = s_center_speed_mm_s;
     s_last_normal_update_ms = 0U;
 
     LineFollowControl_ResetErrorFilter();
@@ -627,6 +673,10 @@ bool LineFollowControl_SetBaseSpeedRangeMmps(
 
     s_center_speed_mm_s = center_speed_mm_s;
     s_min_base_speed_mm_s = minimum_speed_mm_s;
+    if (!s_running)
+    {
+        s_base_speed_ramped_mm_s = center_speed_mm_s;
+    }
     s_status.center_speed_limit_mm_s = center_speed_mm_s;
     s_status.min_base_speed_mm_s = minimum_speed_mm_s;
     return true;

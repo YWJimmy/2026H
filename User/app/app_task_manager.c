@@ -105,7 +105,8 @@ void AppTaskManager_Update(void)
 
     if ((s_status.state == APP_TASK_MANAGER_STARTING) ||
         (s_status.state == APP_TASK_MANAGER_RUNNING) ||
-        (s_status.state == APP_TASK_MANAGER_STOPPING))
+        ((s_status.state == APP_TASK_MANAGER_STOPPING) &&
+         (s_status.stop_reason != APP_TASK_STOP_NATURAL)))
     {
         s_status.elapsed_ms =
             (uint32_t)(now_ms -

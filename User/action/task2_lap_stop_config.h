@@ -23,7 +23,8 @@
 #define TASK2_STOP_MIN_JERK_MM_S3              ((int32_t)1200)
 #define TASK2_STOP_MAX_JERK_MM_S3              ((int32_t)40000)
 
-#define TASK2_RUN_TIMEOUT_MS                   ((uint32_t)20000U)
+/* 20 s 是成绩目标；30 s 是未找到停车线时的安全故障上限。 */
+#define TASK2_RUN_TIMEOUT_MS                   ((uint32_t)30000U)
 #define TASK2_REPORT_PERIOD_MS                 ((uint32_t)200U)
 
 #endif /* TASK2_LAP_STOP_CONFIG_H */
