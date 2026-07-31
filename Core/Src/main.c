@@ -30,6 +30,7 @@
 #include "bsp_debug_uart.h"
 #include "bsp_line_adc.h"
 #include "bsp_line_uart.h"
+#include "bsp_oled.h"
 #include "bsp_vision_uart.h"
 #include "test_runner.h"
 /* USER CODE END Includes */
@@ -190,6 +191,16 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     BSP_DebugUart_ErrorCallback(huart);
     BSP_LineUart_ErrorCallback(huart);
     BSP_VisionUart_ErrorCallback(huart);
+}
+
+void HAL_I2C_MasterTxCpltCallback(I2C_HandleTypeDef *hi2c)
+{
+  BSP_Oled_TxCpltCallback(hi2c);
+}
+
+void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c)
+{
+  BSP_Oled_ErrorCallback(hi2c);
 }
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
