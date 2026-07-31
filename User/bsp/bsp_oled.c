@@ -809,6 +809,70 @@ void BSP_Oled_DrawI32(
     BSP_Oled_DrawU32(x, page, magnitude);
 }
 
+void BSP_Oled_SetPixel(uint8_t x, uint8_t y, bool on)
+{
+    uint8_t page;
+    uint8_t bit;
+
+    if ((x >= BSP_OLED_WIDTH) ||
+        (y >= BSP_OLED_HEIGHT))
+    {
+        return;
+    }
+
+    page = y / 8U;
+    bit = y % 8U;
+
+    if (on)
+    {
+        s_framebuffer[page][x] |= (uint8_t)(1U << bit);
+    }
+    else
+    {
+        s_framebuffer[page][x] &= (uint8_t)(~(1U << bit));
+    }
+
+    s_dirty_mask |= (uint8_t)(1U << page);
+}
+
+void BSP_Oled_FillRect(
+    uint8_t x,
+    uint8_t y,
+    uint8_t w,
+    uint8_t h,
+    bool on)
+{
+    uint8_t col;
+    uint8_t row;
+
+    if ((x >= BSP_OLED_WIDTH) ||
+        (y >= BSP_OLED_HEIGHT))
+    {
+        return;
+    }
+
+    if ((uint16_t)x + w > BSP_OLED_WIDTH)
+    {
+        w = (uint8_t)(BSP_OLED_WIDTH - x);
+    }
+
+    if ((uint16_t)y + h > BSP_OLED_HEIGHT)
+    {
+        h = (uint8_t)(BSP_OLED_HEIGHT - y);
+    }
+
+    for (row = 0U; row < h; row++)
+    {
+        for (col = 0U; col < w; col++)
+        {
+            BSP_Oled_SetPixel(
+                (uint8_t)(x + col),
+                (uint8_t)(y + row),
+                on);
+        }
+    }
+}
+
 void BSP_Oled_MarkPagesDirty(
     uint8_t first_page,
     uint8_t page_count)

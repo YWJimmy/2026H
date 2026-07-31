@@ -4,6 +4,7 @@
 #include "bsp_key.h"
 #include "bsp_oled.h"
 #include "task_menu_ui.h"
+#include "test_ball_balance.h"
 
 #include "stm32f4xx_hal.h"
 
@@ -13,12 +14,96 @@
 
 static bool s_initialized = false;
 static uint32_t s_last_report_ms = 0U;
+static bool s_task_active = false;
+static bool s_task_finish_reported = false;
+static TaskMenuTask_t s_active_task = TASK_MENU_TASK_2_LAP_STOP;
 
 static TaskMenuTask_t s_last_task =
     TASK_MENU_TASK_2_LAP_STOP;
 static TaskMenuState_t s_last_state =
     TASK_MENU_STATE_SELECT;
 static bool s_last_oled_online = false;
+
+
+static bool Test_OledKey_StartTask(TaskMenuTask_t task)
+{
+    if (s_task_active)
+    {
+        return false;
+    }
+
+    if (task == TASK_MENU_TASK_3_BALL_SEQUENCE)
+    {
+        if (!Test_BallBalance_Init())
+        {
+            (void)BSP_Debug_Printf(
+                "ERR,TASK3_BALL_INIT\r\n");
+            return false;
+        }
+
+        s_active_task = task;
+        s_task_active = true;
+        s_task_finish_reported = false;
+        (void)BSP_Debug_Printf(
+            "UI,EVENT=TASK_STARTED,TASK=3,CTRL=ONE_SHOT_PREDICT_CAPTURE\r\n");
+        return true;
+    }
+
+    (void)BSP_Debug_Printf(
+        "UI,EVENT=TASK_NOT_IMPLEMENTED,TASK=%u\r\n",
+        (unsigned int)task);
+    return false;
+}
+
+static void Test_OledKey_StopActiveTask(void)
+{
+    if (!s_task_active)
+    {
+        return;
+    }
+
+    if (s_active_task == TASK_MENU_TASK_3_BALL_SEQUENCE)
+    {
+        Test_BallBalance_Stop();
+    }
+
+    (void)BSP_Debug_Printf(
+        "UI,EVENT=TASK_STOPPED,TASK=%u\r\n",
+        (unsigned int)s_active_task);
+
+    s_task_active = false;
+    s_task_finish_reported = false;
+    s_active_task = TASK_MENU_TASK_2_LAP_STOP;
+}
+
+static void Test_OledKey_UpdateActiveTask(void)
+{
+    if (!s_task_active)
+    {
+        return;
+    }
+
+    if (s_active_task == TASK_MENU_TASK_3_BALL_SEQUENCE)
+    {
+        Test_BallBalance_Update();
+        TaskMenuUi_SetRunningElapsedMs(
+            Test_BallBalance_GetElapsedMs(),
+            Test_BallBalance_IsTimerRunning());
+
+        if (Test_BallBalance_IsFinished() &&
+            (!s_task_finish_reported))
+        {
+            s_task_finish_reported = true;
+            TaskMenuUi_SetFinishedResult(
+                Test_BallBalance_Passed(),
+                Test_BallBalance_GetElapsedMs());
+            (void)BSP_Debug_Printf(
+                "UI,EVENT=TASK_FINISHED,TASK=3,RESULT=%s,"
+                "HOLDING_NEG5_UNTIL_K0\r\n",
+                Test_BallBalance_Passed() ? "PASS" : "FAIL");
+        }
+    }
+}
 
 static void Test_OledKey_ReportChange(void)
 {
@@ -49,6 +134,9 @@ static void Test_OledKey_ReportChange(void)
 bool Test_OledKey_Init(void)
 {
     s_initialized = false;
+    s_task_active = false;
+    s_task_finish_reported = false;
+    s_active_task = TASK_MENU_TASK_2_LAP_STOP;
 
     if (!BSP_DebugUart_Init())
     {
@@ -114,7 +202,6 @@ void Test_OledKey_Update(void)
 
     BSP_Key_Process();
     TaskMenuUi_Process();
-    BSP_Oled_Process();
 
     if (TaskMenuUi_TakeStartRequest(
             &start_task))
@@ -123,14 +210,22 @@ void Test_OledKey_Update(void)
             "UI,EVENT=START_REQUEST,TASK=%u,NAME=%s\r\n",
             (unsigned int)start_task,
             TaskMenuUi_TaskName(start_task));
+
+        if (!Test_OledKey_StartTask(start_task))
+        {
+            TaskMenuUi_SetFinished();
+        }
     }
 
     if (TaskMenuUi_TakeStopRequest())
     {
         (void)BSP_Debug_Printf(
             "UI,EVENT=STOP_REQUEST\r\n");
+        Test_OledKey_StopActiveTask();
     }
 
+    Test_OledKey_UpdateActiveTask();
+    BSP_Oled_Process();
     Test_OledKey_ReportChange();
 
     now_ms = HAL_GetTick();
@@ -169,6 +264,7 @@ void Test_OledKey_Update(void)
 
 void Test_OledKey_Stop(void)
 {
+    Test_OledKey_StopActiveTask();
     s_initialized = false;
     BSP_Oled_Clear();
 

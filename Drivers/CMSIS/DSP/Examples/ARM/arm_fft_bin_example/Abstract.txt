@@ -1,4 +1,4 @@
-CMSIS DSP_Lib example arm_fft_bin_example.
+﻿CMSIS DSP_Lib example arm_fft_bin_example.
 
 The example is available for different targets:
   Cortex-M0

@@ -1,4 +1,4 @@
-# Parameters:
+﻿# Parameters:
 # instance.parameter=value       #(type, mode) default = 'def value' : description : [min..max]
 #------------------------------------------------------------------------------
 armcortexm7ct.semihosting-enable=0                    # (bool  , init-time) default = '1'      : Enable semihosting SVC traps. Applications that do not use semihosting must set this parameter to false.

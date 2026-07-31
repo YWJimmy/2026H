@@ -124,6 +124,21 @@ void BSP_Oled_DrawU32(
     uint32_t value);
 
 /**
+ * @brief 设置单个像素，并标记对应页面待刷新。
+ */
+void BSP_Oled_SetPixel(uint8_t x, uint8_t y, bool on);
+
+/**
+ * @brief 填充矩形区域，并标记对应页面待刷新。
+ */
+void BSP_Oled_FillRect(
+    uint8_t x,
+    uint8_t y,
+    uint8_t w,
+    uint8_t h,
+    bool on);
+
+/**
  * @brief 将指定页面重新标记为待刷新。
  */
 void BSP_Oled_MarkPagesDirty(

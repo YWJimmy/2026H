@@ -1,4 +1,4 @@
-CMSIS DSP_Lib example arm_fir_example.
+﻿CMSIS DSP_Lib example arm_fir_example.
 
 The example is available for different targets:
   Cortex-M0

@@ -1,4 +1,4 @@
-# CubeMX配置：OLED I2C1 400 kHz中断模式
+﻿# CubeMX配置：OLED I2C1 400 kHz中断模式
 
 适配基线：
 
