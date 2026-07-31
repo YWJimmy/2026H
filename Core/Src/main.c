@@ -32,6 +32,8 @@
 #include "bsp_line_uart.h"
 #include "bsp_oled.h"
 #include "bsp_vision_uart.h"
+
+#include "main_app.h"
 #include "test_runner.h"
 /* USER CODE END Includes */
 
@@ -42,7 +44,17 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define PROJECT_ENTRY_MAIN_APP      1U
+#define PROJECT_ENTRY_TEST_RUNNER   2U
 
+/*
+ * 正式主状态机：
+ * PROJECT_ENTRY_MAIN_APP
+ *
+ * 恢复专项测试：
+ * PROJECT_ENTRY_TEST_RUNNER
+ */
+#define PROJECT_ENTRY_MODE          PROJECT_ENTRY_MAIN_APP
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -58,6 +70,7 @@
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
+
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -73,28 +86,23 @@ void SystemClock_Config(void);
   */
 int main(void)
 {
-
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
-
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
 
   /* USER CODE BEGIN Init */
 
   /* USER CODE END Init */
 
-  /* Configure the system clock */
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
 
   /* USER CODE END SysInit */
 
-  /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_ADC1_Init();
@@ -109,11 +117,21 @@ int main(void)
   MX_USART6_UART_Init();
   MX_TIM2_Init();
   MX_UART4_Init();
+
   /* USER CODE BEGIN 2 */
+#if PROJECT_ENTRY_MODE == PROJECT_ENTRY_MAIN_APP
+  if (!MainApp_Init())
+  {
+    Error_Handler();
+  }
+#elif PROJECT_ENTRY_MODE == PROJECT_ENTRY_TEST_RUNNER
   if (!TestRunner_Init())
   {
     Error_Handler();
   }
+#else
+#error "Unsupported PROJECT_ENTRY_MODE"
+#endif
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -123,7 +141,11 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+#if PROJECT_ENTRY_MODE == PROJECT_ENTRY_MAIN_APP
+    MainApp_Update();
+#else
     TestRunner_Update();
+#endif
   }
   /* USER CODE END 3 */
 }
@@ -137,14 +159,9 @@ void SystemClock_Config(void)
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
-  /** Configure the main internal regulator output voltage
-  */
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
-  /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
@@ -153,13 +170,12 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLN = 168;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = 4;
+
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
   }
 
-  /** Initializes the CPU, AHB and APB buses clocks
-  */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
@@ -176,21 +192,21 @@ void SystemClock_Config(void)
 /* USER CODE BEGIN 4 */
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
-    BSP_DebugUart_TxCpltCallback(huart);
-    BSP_LineUart_TxCpltCallback(huart);
+  BSP_DebugUart_TxCpltCallback(huart);
+  BSP_LineUart_TxCpltCallback(huart);
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-    BSP_LineUart_RxCpltCallback(huart);
-    BSP_VisionUart_RxCpltCallback(huart);
+  BSP_LineUart_RxCpltCallback(huart);
+  BSP_VisionUart_RxCpltCallback(huart);
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
-    BSP_DebugUart_ErrorCallback(huart);
-    BSP_LineUart_ErrorCallback(huart);
-    BSP_VisionUart_ErrorCallback(huart);
+  BSP_DebugUart_ErrorCallback(huart);
+  BSP_LineUart_ErrorCallback(huart);
+  BSP_VisionUart_ErrorCallback(huart);
 }
 
 void HAL_I2C_MasterTxCpltCallback(I2C_HandleTypeDef *hi2c)
@@ -222,11 +238,13 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   __disable_irq();
+
   while (1)
   {
   }
   /* USER CODE END Error_Handler_Debug */
 }
+
 #ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number

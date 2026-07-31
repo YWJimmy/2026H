@@ -37,7 +37,7 @@
           <bCustSvd>0</bCustSvd>
           <UseEnv>0</UseEnv>
           <BinPath></BinPath>
-          <IncludePath></IncludePath>
+          <IncludePath>../User/app;../User/action</IncludePath>
           <LibPath></LibPath>
           <RegisterFilePath></RegisterFilePath>
           <DBRegisterFilePath></DBRegisterFilePath>
@@ -339,7 +339,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../User/bsp;../User/test;../User/module</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../User/bsp;../User/test;../User/module;..\User\app;..\User\action</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -788,6 +788,36 @@
               <FileName>chassis_speed_profile.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\module\chassis_speed_profile.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>User/app</GroupName>
+          <Files>
+            <File>
+              <FileName>app_fault.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\app\app_fault.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_task_manager.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\app\app_task_manager.c</FilePath>
+            </File>
+            <File>
+              <FileName>main_app.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\app\main_app.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>User/action</GroupName>
+          <Files>
+            <File>
+              <FileName>app_task_port.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\action\app_task_port.c</FilePath>
             </File>
           </Files>
         </Group>
