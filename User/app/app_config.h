@@ -13,7 +13,7 @@
  * 当前交付仅搭建主状态机骨架。
  * 任务2～6的真实运动逻辑尚未接入，app_task_port.c保持安全空实现。
  */
-#define APP_TASK_PORT_PLACEHOLDER            1U
+#define APP_TASK_PORT_PLACEHOLDER            0U
 
 /* 任务骨架启动和停车状态演示时间。 */
 #define APP_TASK_START_SETTLE_MS             ((uint32_t)20U)

@@ -65,6 +65,10 @@ typedef struct
     int32_t pending_left_q16;
     int32_t pending_right_q16;
 
+    int32_t custom_stop_decel_mm_s2;
+    int32_t custom_stop_jerk_mm_s3;
+    bool custom_stop_active;
+
     ChassisSpeedProfileMode_t mode;
     bool active;
     bool initialized;
@@ -104,6 +108,11 @@ bool ChassisSpeedProfile_SetCommandMmps(
 bool ChassisSpeedProfile_RequestStop(
     ChassisSpeedProfile_t *profile,
     ChassisSpeedProfileMode_t stop_mode);
+
+bool ChassisSpeedProfile_RequestStopWithDecel(
+    ChassisSpeedProfile_t *profile,
+    int32_t decel_mm_s2,
+    int32_t jerk_mm_s3);
 
 /* 将规划器状态同步到外部已生成的实际左右轮目标。 */
 bool ChassisSpeedProfile_SynchronizeOutputMmps(

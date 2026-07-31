@@ -21,6 +21,10 @@ static uint8_t s_error_history_count = 0U;
 static uint8_t s_error_history_index = 0U;
 static int8_t s_last_search_direction = 0;
 static int32_t s_correction_ramped_mm_s = 0;
+static int32_t s_center_speed_mm_s =
+    LINE_FOLLOW_CONTROL_CENTER_SPEED_MM_S;
+static int32_t s_min_base_speed_mm_s =
+    LINE_FOLLOW_CONTROL_MIN_BASE_SPEED_MM_S;
 
 static uint32_t s_state_start_ms = 0U;
 static uint32_t s_center_candidate_start_ms = 0U;
@@ -188,8 +192,8 @@ static int32_t LineFollowControl_GetBaseSpeed(int16_t error)
     int32_t error_abs =
         LineFollowControl_AbsI32((int32_t)error);
     int32_t speed_span =
-        LINE_FOLLOW_CONTROL_CENTER_SPEED_MM_S -
-        LINE_FOLLOW_CONTROL_MIN_BASE_SPEED_MM_S;
+        s_center_speed_mm_s -
+        s_min_base_speed_mm_s;
     int32_t reduction;
 
     error_abs = LineFollowControl_ClampI32(
@@ -201,7 +205,7 @@ static int32_t LineFollowControl_GetBaseSpeed(int16_t error)
         (int32_t)(((int64_t)speed_span * (int64_t)error_abs) /
                   (int64_t)LINE_FOLLOW_CONTROL_ERROR_FULL_SCALE);
 
-    return LINE_FOLLOW_CONTROL_CENTER_SPEED_MM_S - reduction;
+    return s_center_speed_mm_s - reduction;
 }
 
 static int32_t LineFollowControl_GetCorrectionStep(uint32_t dt_ms)
@@ -586,6 +590,10 @@ bool LineFollowControl_Init(void)
     s_previous_normal_error = 0;
     s_last_search_direction = 0;
     s_correction_ramped_mm_s = 0;
+    s_center_speed_mm_s =
+        LINE_FOLLOW_CONTROL_CENTER_SPEED_MM_S;
+    s_min_base_speed_mm_s =
+        LINE_FOLLOW_CONTROL_MIN_BASE_SPEED_MM_S;
     s_state_start_ms = HAL_GetTick();
     s_last_normal_update_ms = 0U;
 
@@ -597,6 +605,8 @@ bool LineFollowControl_Init(void)
     s_status.stop_reason = LINE_FOLLOW_CONTROL_STOP_NONE;
     s_status.line_state = LINE_FOLLOW_STATE_INVALID;
     s_status.timestamp_ms = s_state_start_ms;
+    s_status.center_speed_limit_mm_s = s_center_speed_mm_s;
+    s_status.min_base_speed_mm_s = s_min_base_speed_mm_s;
 
     if (!Chassis_Init())
     {
@@ -648,6 +658,8 @@ bool LineFollowControl_Start(void)
     s_status.stop_reason = LINE_FOLLOW_CONTROL_STOP_NONE;
     s_status.line_state = LINE_FOLLOW_STATE_INVALID;
     s_status.timestamp_ms = now_ms;
+    s_status.center_speed_limit_mm_s = s_center_speed_mm_s;
+    s_status.min_base_speed_mm_s = s_min_base_speed_mm_s;
 
     s_state_start_ms = now_ms;
     if (!Chassis_SetLineFollowCommandMmps(0, 0))
@@ -657,6 +669,26 @@ bool LineFollowControl_Start(void)
         return false;
     }
 
+    return true;
+}
+
+bool LineFollowControl_SetBaseSpeedRangeMmps(
+    int32_t center_speed_mm_s,
+    int32_t minimum_speed_mm_s)
+{
+    if ((!s_initialized) ||
+        (minimum_speed_mm_s <= 0) ||
+        (center_speed_mm_s < minimum_speed_mm_s) ||
+        (center_speed_mm_s >
+         LINE_FOLLOW_CONTROL_MAX_WHEEL_SPEED_MM_S))
+    {
+        return false;
+    }
+
+    s_center_speed_mm_s = center_speed_mm_s;
+    s_min_base_speed_mm_s = minimum_speed_mm_s;
+    s_status.center_speed_limit_mm_s = center_speed_mm_s;
+    s_status.min_base_speed_mm_s = minimum_speed_mm_s;
     return true;
 }
 
@@ -687,6 +719,47 @@ bool LineFollowControl_RequestStop(
 
     LineFollowControl_ResetPd();
     if (!Chassis_RequestStop(CHASSIS_STOP_MODE_FAST))
+    {
+        LineFollowControl_Stop(
+            LINE_FOLLOW_CONTROL_STOP_COMMAND_ERROR);
+        return false;
+    }
+
+    return true;
+}
+
+bool LineFollowControl_RequestStopWithDecel(
+    LineFollowControlStopReason_t reason,
+    int32_t decel_mm_s2,
+    int32_t jerk_mm_s3)
+{
+    uint32_t now_ms;
+
+    if ((!s_initialized) || (!s_running) ||
+        (decel_mm_s2 <= 0) || (jerk_mm_s3 <= 0))
+    {
+        return false;
+    }
+
+    now_ms = HAL_GetTick();
+    s_running = false;
+    s_stopping = true;
+    s_status.running = false;
+    s_status.stopping = true;
+    s_status.mode = LINE_FOLLOW_CONTROL_MODE_STOPPING;
+    s_status.stop_reason = reason;
+    s_status.base_speed_mm_s = 0;
+    s_status.correction_target_mm_s = 0;
+    s_status.correction_mm_s = 0;
+    s_status.left_target_mm_s = 0;
+    s_status.right_target_mm_s = 0;
+    s_status.timestamp_ms = now_ms;
+    s_state_start_ms = now_ms;
+
+    LineFollowControl_ResetPd();
+    if (!Chassis_RequestStopWithDecel(
+            decel_mm_s2,
+            jerk_mm_s3))
     {
         LineFollowControl_Stop(
             LINE_FOLLOW_CONTROL_STOP_COMMAND_ERROR);
@@ -881,6 +954,8 @@ const char *LineFollowControl_StopReasonName(
             return "LOST_DIR";
         case LINE_FOLLOW_CONTROL_STOP_ALL_BLACK_TIMEOUT:
             return "BLACK_TO";
+        case LINE_FOLLOW_CONTROL_STOP_TASK_COMPLETE:
+            return "TASK_DONE";
         case LINE_FOLLOW_CONTROL_STOP_COMMAND_ERROR:
             return "CMD_ERR";
         default:

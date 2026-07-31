@@ -481,7 +481,12 @@ static bool Profile_UpdateStop(ChassisSpeedProfile_t *profile,
     int32_t jerk_mm_s3;
     bool stop_active;
 
-    if (profile->mode == CHASSIS_SPEED_PROFILE_MODE_FAST_STOP)
+    if (profile->custom_stop_active)
+    {
+        decel_mm_s2 = profile->custom_stop_decel_mm_s2;
+        jerk_mm_s3 = profile->custom_stop_jerk_mm_s3;
+    }
+    else if (profile->mode == CHASSIS_SPEED_PROFILE_MODE_FAST_STOP)
     {
         decel_mm_s2 = profile->config.fast_stop_decel_mm_s2;
         jerk_mm_s3 = profile->config.fast_stop_jerk_mm_s3;
@@ -694,9 +699,41 @@ bool ChassisSpeedProfile_RequestStop(
     profile->command_right_q16 = 0;
     profile->pending_left_q16 = 0;
     profile->pending_right_q16 = 0;
+    profile->custom_stop_active = false;
 
     Profile_CaptureStopStart(profile);
     profile->mode = stop_mode;
+
+    if (!profile->active)
+    {
+        profile->output_left_q16 = 0;
+        profile->output_right_q16 = 0;
+    }
+
+    return true;
+}
+
+bool ChassisSpeedProfile_RequestStopWithDecel(
+    ChassisSpeedProfile_t *profile,
+    int32_t decel_mm_s2,
+    int32_t jerk_mm_s3)
+{
+    if ((profile == NULL) || (!profile->initialized) ||
+        (decel_mm_s2 <= 0) || (jerk_mm_s3 <= 0))
+    {
+        return false;
+    }
+
+    profile->command_left_q16 = 0;
+    profile->command_right_q16 = 0;
+    profile->pending_left_q16 = 0;
+    profile->pending_right_q16 = 0;
+    profile->custom_stop_decel_mm_s2 = decel_mm_s2;
+    profile->custom_stop_jerk_mm_s3 = jerk_mm_s3;
+    profile->custom_stop_active = true;
+
+    Profile_CaptureStopStart(profile);
+    profile->mode = CHASSIS_SPEED_PROFILE_MODE_SOFT_STOP;
 
     if (!profile->active)
     {

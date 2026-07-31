@@ -166,7 +166,22 @@ void AppTaskManager_Update(void)
             break;
 
         case APP_TASK_MANAGER_STOPPING:
-            if (AppTaskPort_IsStopped(
+            result = AppTaskPort_Update(
+                s_status.task,
+                now_ms);
+
+            if (result == APP_TASK_PORT_RESULT_FAULT)
+            {
+                s_status.stop_reason =
+                    APP_TASK_STOP_FAULT;
+                s_status.fault_detail =
+                    AppTaskPort_GetFaultDetail();
+                AppTaskPort_ForceSafeStop();
+                AppTaskManager_SetState(
+                    APP_TASK_MANAGER_FAULT,
+                    now_ms);
+            }
+            else if (AppTaskPort_IsStopped(
                     s_status.task) &&
                 AppTaskManager_Elapsed(
                     now_ms,

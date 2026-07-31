@@ -898,6 +898,40 @@ bool Chassis_RequestStop(ChassisStopMode_t mode)
     return true;
 }
 
+bool Chassis_RequestStopWithDecel(
+    int32_t decel_mm_s2,
+    int32_t jerk_mm_s3)
+{
+    if ((!s_initialized) || s_emergency_latched ||
+        (decel_mm_s2 <= 0) || (jerk_mm_s3 <= 0))
+    {
+        return false;
+    }
+
+    if (!Chassis_LeaveLineFollowMode())
+    {
+        return false;
+    }
+
+    if (!ChassisSpeedProfile_RequestStopWithDecel(
+            &s_speed_profile,
+            decel_mm_s2,
+            jerk_mm_s3))
+    {
+        return false;
+    }
+
+    s_status.left_command_mm_s = 0;
+    s_status.right_command_mm_s = 0;
+    s_status.left_command_cps = 0;
+    s_status.right_command_cps = 0;
+    s_status.forward_command_mm_s = 0;
+    s_status.turn_command_mm_s = 0;
+    s_status.motion_stopped = false;
+    s_stopped_stable_ms = 0U;
+    return true;
+}
+
 bool Chassis_IsMotionStopped(void)
 {
     if (!s_initialized)

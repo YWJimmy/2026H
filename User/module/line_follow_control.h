@@ -29,6 +29,7 @@ typedef enum
     LINE_FOLLOW_CONTROL_STOP_LOST_TIMEOUT,
     LINE_FOLLOW_CONTROL_STOP_LOST_NO_DIRECTION,
     LINE_FOLLOW_CONTROL_STOP_ALL_BLACK_TIMEOUT,
+    LINE_FOLLOW_CONTROL_STOP_TASK_COMPLETE,
     LINE_FOLLOW_CONTROL_STOP_COMMAND_ERROR
 } LineFollowControlStopReason_t;
 
@@ -51,6 +52,8 @@ typedef struct
     int16_t error_delta;
 
     int32_t base_speed_mm_s;
+    int32_t center_speed_limit_mm_s;
+    int32_t min_base_speed_mm_s;
     int32_t correction_target_mm_s;
     int32_t correction_mm_s;
     int32_t left_target_mm_s;
@@ -67,9 +70,18 @@ typedef struct
 bool LineFollowControl_Init(void);
 bool LineFollowControl_Start(void);
 
+bool LineFollowControl_SetBaseSpeedRangeMmps(
+    int32_t center_speed_mm_s,
+    int32_t minimum_speed_mm_s);
+
 /* 普通用户停止：快速限跃度停车。 */
 bool LineFollowControl_RequestStop(
     LineFollowControlStopReason_t reason);
+
+bool LineFollowControl_RequestStopWithDecel(
+    LineFollowControlStopReason_t reason,
+    int32_t decel_mm_s2,
+    int32_t jerk_mm_s3);
 
 /* 故障停止：立即锁存急停。 */
 void LineFollowControl_Stop(LineFollowControlStopReason_t reason);

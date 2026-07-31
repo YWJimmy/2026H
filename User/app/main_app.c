@@ -96,8 +96,13 @@ static void MainApp_SetState(
 
         case APP_STATE_MENU:
             TaskMenuUi_SetElapsedMs(0U);
+#if APP_TASK_PORT_PLACEHOLDER
             TaskMenuUi_SetStatusText(
                 "SAFE SKELETON");
+#else
+            TaskMenuUi_SetStatusText(
+                "TASK 2 READY");
+#endif
             TaskMenuUi_SetState(
                 TASK_MENU_STATE_SELECT);
             break;

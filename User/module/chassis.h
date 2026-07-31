@@ -120,6 +120,9 @@ bool Chassis_SetVelocity(int32_t linear_mm_s,
 
 /* 柔和停车、快速停车或立即锁存急停。 */
 bool Chassis_RequestStop(ChassisStopMode_t mode);
+bool Chassis_RequestStopWithDecel(
+    int32_t decel_mm_s2,
+    int32_t jerk_mm_s3);
 bool Chassis_IsMotionStopped(void);
 
 bool Chassis_SetWheelPiGainsQ10(int32_t left_kp_q10,

@@ -824,6 +824,11 @@
               <FileType>1</FileType>
               <FilePath>..\User\action\app_task_port.c</FilePath>
             </File>
+            <File>
+              <FileName>task2_lap_stop.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\action\task2_lap_stop.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
