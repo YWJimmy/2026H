@@ -11,6 +11,11 @@ from libs.PipeLine import PipeLine, ScopedTiming
 from media.sensor import Sensor
 from machine import FPIOA
 from machine import UART
+from steel_ball_temporal_tracker import PIPE_CENTER_INTERCEPT
+from steel_ball_temporal_tracker import PIPE_CENTER_SLOPE
+from steel_ball_temporal_tracker import PIPE_ROI_HALF_HEIGHT
+from steel_ball_temporal_tracker import PIPE_ROI_X_MAX
+from steel_ball_temporal_tracker import PIPE_ROI_X_MIN
 from steel_ball_temporal_tracker import ShortTermTracker
 import aidemo
 import gc
@@ -178,8 +183,81 @@ class SteelBallYoloV8(AIBase):
             )
         return detections
 
+    def _draw_pipe_roi(self, pipeline):
+        display_w, display_h = self.display_size
+        left_center_y = (
+            PIPE_CENTER_INTERCEPT
+            + PIPE_CENTER_SLOPE * PIPE_ROI_X_MIN
+        )
+        right_center_y = (
+            PIPE_CENTER_INTERCEPT
+            + PIPE_CENTER_SLOPE * PIPE_ROI_X_MAX
+        )
+        left_x = int(
+            PIPE_ROI_X_MIN * display_w / OUTPUT_COORD_SIZE[0]
+        )
+        right_x = int(
+            PIPE_ROI_X_MAX * display_w / OUTPUT_COORD_SIZE[0]
+        )
+        left_top_y = int(
+            max(0.0, left_center_y - PIPE_ROI_HALF_HEIGHT)
+            * display_h / OUTPUT_COORD_SIZE[1]
+        )
+        left_bottom_y = int(
+            min(
+                OUTPUT_COORD_SIZE[1] - 1,
+                left_center_y + PIPE_ROI_HALF_HEIGHT,
+            )
+            * display_h / OUTPUT_COORD_SIZE[1]
+        )
+        right_top_y = int(
+            max(0.0, right_center_y - PIPE_ROI_HALF_HEIGHT)
+            * display_h / OUTPUT_COORD_SIZE[1]
+        )
+        right_bottom_y = int(
+            min(
+                OUTPUT_COORD_SIZE[1] - 1,
+                right_center_y + PIPE_ROI_HALF_HEIGHT,
+            )
+            * display_h / OUTPUT_COORD_SIZE[1]
+        )
+        roi_color = (255, 255, 255, 0)
+        pipeline.osd_img.draw_line(
+            left_x,
+            left_top_y,
+            right_x,
+            right_top_y,
+            color=roi_color,
+            thickness=2,
+        )
+        pipeline.osd_img.draw_line(
+            left_x,
+            left_bottom_y,
+            right_x,
+            right_bottom_y,
+            color=roi_color,
+            thickness=2,
+        )
+        pipeline.osd_img.draw_line(
+            left_x,
+            left_top_y,
+            left_x,
+            left_bottom_y,
+            color=roi_color,
+            thickness=2,
+        )
+        pipeline.osd_img.draw_line(
+            right_x,
+            right_top_y,
+            right_x,
+            right_bottom_y,
+            color=roi_color,
+            thickness=2,
+        )
+
     def draw_result(self, pipeline, detection):
         pipeline.osd_img.clear()
+        self._draw_pipe_roi(pipeline)
         if detection is None:
             return
         x1, y1, x2, y2, score = detection

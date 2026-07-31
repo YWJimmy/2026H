@@ -37,6 +37,7 @@ static void test_observed_frame(void)
     assert(frame.center_x == 120U);
     assert(frame.center_y == 220U);
     assert(frame.score_milli == 873U);
+    assert(frame.physical_x_mm == -120);
     assert(parser.valid_frame_count == 1U);
     assert(parser.invalid_frame_count == 0U);
 }
@@ -49,9 +50,11 @@ static void test_no_target_and_predicted_frame(void)
     VisionProtocol_Init(&parser);
     assert(feed_text(&parser, "SB,0,0,0,0,0,0,0,0\n", &frame));
     assert(!frame.found);
+    assert(frame.physical_x_mm == 0);
     assert(feed_text(&parser, "SB,1,10,20,30,40,20,30,0\n", &frame));
     assert(frame.found);
     assert(frame.score_milli == 0U);
+    assert(frame.physical_x_mm == -120);
     assert(parser.valid_frame_count == 2U);
 }
 
@@ -100,6 +103,22 @@ static void test_overlong_line_recovers(void)
     assert(feed_text(&parser, "SB,0,0,0,0,0,0,0,0\n", &frame));
 }
 
+static void test_physical_coordinate_calibration(void)
+{
+    assert(VisionProtocol_CenterXToPhysicalMm(0U) == -120);
+    assert(VisionProtocol_CenterXToPhysicalMm(153U) == -120);
+    assert(VisionProtocol_CenterXToPhysicalMm(447U) == -50);
+    assert(VisionProtocol_CenterXToPhysicalMm(653U) == 0);
+    assert(VisionProtocol_CenterXToPhysicalMm(869U) == 50);
+    assert(VisionProtocol_CenterXToPhysicalMm(1160U) == 120);
+    assert(VisionProtocol_CenterXToPhysicalMm(1279U) == 120);
+
+    /* 分段中点采用最接近毫米的四舍五入。 */
+    assert(VisionProtocol_CenterXToPhysicalMm(300U) == -85);
+    assert(VisionProtocol_CenterXToPhysicalMm(550U) == -25);
+    assert(VisionProtocol_CenterXToPhysicalMm(761U) == 25);
+}
+
 int main(void)
 {
     test_observed_frame();
@@ -107,6 +126,7 @@ int main(void)
     test_fragmented_input_and_noise_recovery();
     test_rejects_bad_fields_and_ranges();
     test_overlong_line_recovers();
+    test_physical_coordinate_calibration();
     puts("vision_protocol: PASS");
     return 0;
 }

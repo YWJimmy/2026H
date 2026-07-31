@@ -29,7 +29,8 @@ bool Test_VisionUart_Init(void)
     s_initialized = true;
     (void)BSP_Debug_Printf(
         "TEST,VISION_UART,START,RX=PG9,TX=PG14,BAUD=115200,"
-        "FRAME=SB_FOUND_X1_Y1_X2_Y2_CX_CY_SCORE\r\n");
+        "FRAME=SB_FOUND_X1_Y1_X2_Y2_CX_CY_SCORE,"
+        "PHYSICAL_X_UNIT=MM\r\n");
     return true;
 }
 
@@ -63,12 +64,13 @@ void Test_VisionUart_Update(void)
         ? (uint32_t)(now_ms - status.timestamp_ms)
         : 0U;
     (void)BSP_Debug_Printf(
-        "VU,SEQ=%lu,FOUND=%u,CX=%u,CY=%u,SCORE=%u,VALID=%u,AGE=%lu,"
+        "VU,SEQ=%lu,FOUND=%u,CX=%u,CY=%u,X_MM=%d,SCORE=%u,VALID=%u,AGE=%lu,"
         "RX=%lu,Q=%u,VF=%lu,IF=%lu,PO=%lu,RO=%lu,UE=%lu,RR=%lu,LE=0x%08lX\r\n",
         (unsigned long)status.sequence,
         status.frame.found ? 1U : 0U,
         (unsigned int)status.frame.center_x,
         (unsigned int)status.frame.center_y,
+        (int)status.frame.physical_x_mm,
         (unsigned int)status.frame.score_milli,
         status.data_valid ? 1U : 0U,
         (unsigned long)age_ms,

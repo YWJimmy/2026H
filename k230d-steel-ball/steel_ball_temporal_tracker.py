@@ -23,11 +23,15 @@ MIN_BOX_SIZE = 20
 MAX_BOX_SIZE = 160
 MIN_ASPECT_RATIO = 0.35
 MAX_ASPECT_RATIO = 2.80
-PIPE_ROI_X_MIN = 0
-PIPE_ROI_X_MAX = 1279
-PIPE_CENTER_SLOPE = 0.0
-PIPE_CENTER_INTERCEPT = 479.0
-PIPE_ROI_HALF_HEIGHT = 100.0
+# Fixed-camera pipe ROI fitted from 15.bmp.  Coordinates are in the
+# 1280x960 output system (the 640x480 preview coordinates are doubled).
+# Keep horizontal margins outside the measured ball travel endpoints
+# cx=153 and cx=1160 so endpoint jitter is not rejected.
+PIPE_ROI_X_MIN = 100
+PIPE_ROI_X_MAX = 1200
+PIPE_CENTER_SLOPE = -0.034
+PIPE_CENTER_INTERCEPT = 437.0
+PIPE_ROI_HALF_HEIGHT = 70.0
 
 
 def _center(box):

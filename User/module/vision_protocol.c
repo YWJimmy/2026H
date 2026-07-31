@@ -5,6 +5,59 @@
 
 #define VISION_PROTOCOL_VALUE_COUNT      8U
 
+int16_t VisionProtocol_CenterXToPhysicalMm(uint16_t center_x)
+{
+    static const uint16_t calibration_cx[] =
+    {
+        VISION_CAL_CX_NEG_120_MM,
+        VISION_CAL_CX_NEG_50_MM,
+        VISION_CAL_CX_ZERO_MM,
+        VISION_CAL_CX_POS_50_MM,
+        VISION_CAL_CX_POS_120_MM
+    };
+    static const int16_t calibration_mm[] =
+    {
+        VISION_PHYSICAL_X_MIN_MM,
+        -50,
+        0,
+        50,
+        VISION_PHYSICAL_X_MAX_MM
+    };
+    uint8_t segment;
+
+    if (center_x <= calibration_cx[0])
+    {
+        return calibration_mm[0];
+    }
+
+    if (center_x >= calibration_cx[4])
+    {
+        return calibration_mm[4];
+    }
+
+    for (segment = 0U; segment < 4U; segment++)
+    {
+        if (center_x <= calibration_cx[segment + 1U])
+        {
+            uint32_t pixel_offset =
+                (uint32_t)center_x - calibration_cx[segment];
+            uint32_t pixel_span =
+                (uint32_t)calibration_cx[segment + 1U] -
+                calibration_cx[segment];
+            uint32_t physical_span =
+                (uint32_t)(calibration_mm[segment + 1U] -
+                           calibration_mm[segment]);
+            int32_t physical_offset = (int32_t)(
+                (pixel_offset * physical_span + pixel_span / 2U) /
+                pixel_span);
+
+            return (int16_t)(calibration_mm[segment] + physical_offset);
+        }
+    }
+
+    return VISION_PHYSICAL_X_MAX_MM;
+}
+
 static bool VisionProtocol_ParseUnsigned(const char *line,
                                          uint16_t length,
                                          uint16_t *index,
@@ -115,6 +168,9 @@ static bool VisionProtocol_ParseLine(const char *line,
     frame->center_x = (uint16_t)values[5];
     frame->center_y = (uint16_t)values[6];
     frame->score_milli = (uint16_t)values[7];
+    frame->physical_x_mm = frame->found
+        ? VisionProtocol_CenterXToPhysicalMm(frame->center_x)
+        : 0;
     return true;
 }
 
