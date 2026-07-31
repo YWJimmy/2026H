@@ -498,6 +498,11 @@
               <FileType>1</FileType>
               <FilePath>..\User\test\test_ball_balance.c</FilePath>
             </File>
+            <File>
+              <FileName>test_chassis_ramp.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\test\test_chassis_ramp.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

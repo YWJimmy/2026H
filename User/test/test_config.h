@@ -19,7 +19,7 @@
 #define TEST_MODE_BALL_BALANCE              20U
 
 #ifndef PROJECT_TEST_MODE
-#define PROJECT_TEST_MODE                   TEST_MODE_LINE_FOLLOW_DRIVE
+#define PROJECT_TEST_MODE                   TEST_MODE_CHASSIS_RAMP
 #endif
 
 #endif /* TEST_CONFIG_H */
