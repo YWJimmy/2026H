@@ -136,13 +136,22 @@ static bool BallBalance_ReturnCenter(
     BallBalanceMode_t mode,
     BallBalanceEvent_t event)
 {
-    bool result = BallBalance_SetPulse(
-        BALL_BALANCE_SERVO_CENTER_US);
+    if (!BallBalance_SetPulse(
+            BALL_BALANCE_SERVO_CENTER_US))
+    {
+        /*
+         * BallBalance_SetPulse已经记录SERVO_ERROR和
+         * SERVO_COMMAND_ERROR。这里只复位运动估计，
+         * 不能再用回中模式和回中事件覆盖真实故障。
+         */
+        BallBalance_ResetMotionEstimate();
+        return false;
+    }
 
     BallBalance_ResetMotionEstimate();
     s_status.mode = mode;
     BallBalance_SetEvent(event);
-    return result;
+    return true;
 }
 
 static int32_t BallBalance_CalculateControlDelta(void)

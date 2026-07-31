@@ -18,6 +18,7 @@ static bool s_vision_ok = false;
 static uint32_t s_last_print_ms = 0U;
 static uint32_t s_last_heartbeat_ms = 0U;
 static uint32_t s_last_event_sequence = 0U;
+static uint32_t s_last_servo_error_count = 0U;
 
 static void Test_BallBalance_PrintEvent(
     const BallBalanceControlStatus_t *control)
@@ -45,6 +46,7 @@ bool Test_BallBalance_Init(void)
     s_initialized = false;
     s_vision_ok = false;
     s_last_event_sequence = 0U;
+    s_last_servo_error_count = 0U;
 
     if (!BSP_DebugUart_Init())
     {
@@ -113,6 +115,7 @@ void Test_BallBalance_Update(void)
     BallBalanceControlStatus_t control;
     bool have_vision_status = false;
     bool have_control_status;
+    bool control_update_ok = true;
     uint32_t now_ms;
 
     if (!s_initialized)
@@ -130,8 +133,9 @@ void Test_BallBalance_Update(void)
 
         if (have_vision_status)
         {
-            (void)BallBalanceControl_Update(
-                &vision_status);
+            control_update_ok =
+                BallBalanceControl_Update(
+                    &vision_status);
         }
     }
 
@@ -141,7 +145,32 @@ void Test_BallBalance_Update(void)
 
     if (have_control_status)
     {
+        if (!control_update_ok &&
+            (control.servo_error_count !=
+             s_last_servo_error_count))
+        {
+            s_last_servo_error_count =
+                control.servo_error_count;
+
+            (void)BSP_Debug_Printf(
+                "ERR,BALL_SERVO_CMD,COUNT=%lu,"
+                "MODE=%s,EVENT=%s\r\n",
+                (unsigned long)control.servo_error_count,
+                BallBalanceControl_ModeName(control.mode),
+                BallBalanceControl_EventName(
+                    control.last_event));
+        }
+
         Test_BallBalance_PrintEvent(&control);
+    }
+    else if (!control_update_ok)
+    {
+        /*
+         * 正常情况下控制模块已初始化，状态应可读取。
+         * 保留兜底日志，避免Update失败被静默忽略。
+         */
+        (void)BSP_Debug_Printf(
+            "ERR,BALL_CONTROL_UPDATE,STATUS=UNAVAILABLE\r\n");
     }
 
     if ((uint32_t)(now_ms - s_last_heartbeat_ms) >=

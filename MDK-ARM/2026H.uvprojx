@@ -434,6 +434,11 @@
           <GroupName>User/test</GroupName>
           <Files>
             <File>
+              <FileName>test_runner.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\test\test_runner.c</FilePath>
+            </File>
+            <File>
               <FileName>test_encoder.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\test\test_encoder.c</FilePath>
@@ -462,11 +467,6 @@
               <FileName>test_line_uart.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\test\test_line_uart.c</FilePath>
-            </File>
-            <File>
-              <FileName>test_runner.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\User\test\test_runner.c</FilePath>
             </File>
             <File>
               <FileName>test_chassis_straight.c</FileName>
