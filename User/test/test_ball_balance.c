@@ -14,12 +14,15 @@
 #define BALL_TARGET_CX          500
 
 /*
- * Servo pulse width limits (us), measured by user.
+ * Servo pulse width limits (us).
  * 1600 = stable/level, 1400 = ball left, 1800 = ball right.
+ * Normal push limited to 1500-1700; braking allowed 1400-1800.
  */
 #define SERVO_CENTER_US         1600U
-#define SERVO_MIN_US            1400U
-#define SERVO_MAX_US            1800U
+#define SERVO_PUSH_MIN_US       1400U
+#define SERVO_PUSH_MAX_US       1800U
+#define SERVO_BRAKE_MIN_US      1300U
+#define SERVO_BRAKE_MAX_US      1900U
 
 /*
  * P-gain: push strength when ball is not braking.
@@ -30,7 +33,7 @@
  * Braking: start braking when distance < |speed| * BRAKE_GAIN.
  * Higher = brake earlier.
  */
-#define BALL_BRAKE_GAIN         3.0f
+#define BALL_BRAKE_GAIN         5.0f
 
 /*
  * Base brake pulse offset from center (us).
@@ -43,6 +46,13 @@
  * Maximum brake pulse offset (us).
  */
 #define BALL_BRAKE_MAX_US       120U
+
+/*
+ * Stuck detection: if |speed| < this for consecutive frames while
+ * outside dead zone, gradually increase push force.
+ */
+#define BALL_STUCK_SPEED_PX     3
+#define BALL_STUCK_BOOST_US     5U
 
 /*
  * Dead zone: |error| <= 30 → ball within 470..530, hold level.
@@ -79,11 +89,16 @@ static int32_t  s_speed              = 0;
 static int32_t  s_last_delta         = 0;
 static bool     s_has_target         = false;
 static bool     s_braking            = false;
+static uint32_t s_stuck_boost        = 0U;
 
-static uint16_t Servo_ClampPulse(int32_t raw)
+static uint16_t Servo_ClampPulse(int32_t raw, bool braking)
 {
-    if (raw < (int32_t)SERVO_MIN_US) return SERVO_MIN_US;
-    if (raw > (int32_t)SERVO_MAX_US) return SERVO_MAX_US;
+    int32_t min_us = braking ? (int32_t)SERVO_BRAKE_MIN_US
+                             : (int32_t)SERVO_PUSH_MIN_US;
+    int32_t max_us = braking ? (int32_t)SERVO_BRAKE_MAX_US
+                             : (int32_t)SERVO_PUSH_MAX_US;
+    if (raw < min_us) return (uint16_t)min_us;
+    if (raw > max_us) return (uint16_t)max_us;
     return (uint16_t)raw;
 }
 
@@ -99,6 +114,7 @@ bool Test_BallBalance_Init(void)
     s_speed             = 0;
     s_last_delta        = 0;
     s_braking           = false;
+    s_stuck_boost       = 0U;
 
     if (!BSP_DebugUart_Init())
     {
@@ -109,13 +125,18 @@ bool Test_BallBalance_Init(void)
         "BALL_BAL,START,MODE=BRAKE,"
         "TARGET_CX=%d,DEADZONE=%d,"
         "PUSH_KP=%.2f,BRAKE_GAIN=%.1f,"
-        "BRAKE_BASE=%u,BRAKE_MAX=%u\r\n",
+        "BRAKE_BASE=%u,BRAKE_MAX=%u,"
+        "LIMS=PUSH_%u_%u_BRAKE_%u_%u\r\n",
         BALL_TARGET_CX,
         BALL_DEADZONE_PX,
         (double)BALL_PUSH_KP,
         (double)BALL_BRAKE_GAIN,
         (unsigned int)BALL_BRAKE_BASE_US,
-        (unsigned int)BALL_BRAKE_MAX_US);
+        (unsigned int)BALL_BRAKE_MAX_US,
+        (unsigned int)SERVO_PUSH_MIN_US,
+        (unsigned int)SERVO_PUSH_MAX_US,
+        (unsigned int)SERVO_BRAKE_MIN_US,
+        (unsigned int)SERVO_BRAKE_MAX_US);
 
     /* Init servo at center position before enabling */
     if (!BSP_Servo_Init())
@@ -264,6 +285,24 @@ void Test_BallBalance_Update(void)
                     s_braking = false;
                 }
 
+                /* Stuck detection: ball not moving, ramp up push */
+                if (abs(s_speed) < BALL_STUCK_SPEED_PX && !s_braking)
+                {
+                    s_stuck_boost += BALL_STUCK_BOOST_US;
+                    if (delta > 0)
+                    {
+                        delta += (int32_t)s_stuck_boost;
+                    }
+                    else
+                    {
+                        delta -= (int32_t)s_stuck_boost;
+                    }
+                }
+                else
+                {
+                    s_stuck_boost = 0U;
+                }
+
                 /* Minimum step */
                 if ((delta > 0) && (delta < (int32_t)BALL_MIN_STEP_US))
                 {
@@ -276,7 +315,7 @@ void Test_BallBalance_Update(void)
 
                 s_last_delta   = delta;
                 raw_pulse      = (int32_t)SERVO_CENTER_US + delta;
-                clamped_pulse  = Servo_ClampPulse(raw_pulse);
+                clamped_pulse  = Servo_ClampPulse(raw_pulse, s_braking);
 
                 if (clamped_pulse != (uint16_t)s_servo_pulse)
                 {
