@@ -29,11 +29,16 @@ typedef struct
 } DebugUartMessage_t;
 
 static DebugUartMessage_t s_queue[BSP_DEBUG_UART_QUEUE_DEPTH];
+static DebugUartMessage_t s_bt_queue[BSP_DEBUG_UART_QUEUE_DEPTH];
 
 static volatile uint8_t s_head = 0U;
 static volatile uint8_t s_tail = 0U;
 static volatile uint8_t s_count = 0U;
 static volatile bool s_dma_busy = false;
+static volatile uint8_t s_bt_head = 0U;
+static volatile uint8_t s_bt_tail = 0U;
+static volatile uint8_t s_bt_count = 0U;
+static volatile bool s_bt_it_busy = false;
 static volatile bool s_initialized = false;
 static volatile uint32_t s_dropped_count = 0U;
 static volatile uint32_t s_truncated_count = 0U;
@@ -84,13 +89,18 @@ bool BSP_DebugUart_Init(void)
     s_tail = 0U;
     s_count = 0U;
     s_dma_busy = false;
+    s_bt_head = 0U;
+    s_bt_tail = 0U;
+    s_bt_count = 0U;
+    s_bt_it_busy = false;
     s_dropped_count = 0U;
     s_truncated_count = 0U;
     s_initialized = false;
 
     DebugUart_ExitCritical(primask);
 
-    if ((huart1.Instance != USART1) || (huart1.hdmatx == NULL))
+    if ((huart1.Instance != USART1) || (huart1.hdmatx == NULL) ||
+        (huart2.Instance != USART2))
     {
         return false;
     }
@@ -112,6 +122,7 @@ bool BSP_DebugUart_Write(const uint8_t *data, size_t length)
     uint32_t primask;
     uint16_t stored_length;
     uint8_t write_index;
+    uint8_t bt_write_index;
 
     if ((!s_initialized) || (data == NULL) || (length == 0U))
     {
@@ -130,7 +141,8 @@ bool BSP_DebugUart_Write(const uint8_t *data, size_t length)
 
     primask = DebugUart_EnterCritical();
 
-    if (s_count >= BSP_DEBUG_UART_QUEUE_DEPTH)
+    if ((s_count >= BSP_DEBUG_UART_QUEUE_DEPTH) ||
+        (s_bt_count >= BSP_DEBUG_UART_QUEUE_DEPTH))
     {
         s_dropped_count++;
         DebugUart_ExitCritical(primask);
@@ -138,11 +150,16 @@ bool BSP_DebugUart_Write(const uint8_t *data, size_t length)
     }
 
     write_index = s_head;
+    bt_write_index = s_bt_head;
     memcpy(s_queue[write_index].data, data, stored_length);
     s_queue[write_index].length = stored_length;
+    memcpy(s_bt_queue[bt_write_index].data, data, stored_length);
+    s_bt_queue[bt_write_index].length = stored_length;
 
     s_head = DebugUart_NextIndex(s_head);
     s_count++;
+    s_bt_head = DebugUart_NextIndex(s_bt_head);
+    s_bt_count++;
 
     DebugUart_ExitCritical(primask);
 
@@ -204,8 +221,10 @@ int BSP_Debug_Printf(const char *format, ...)
 void BSP_DebugUart_Process(void)
 {
     uint32_t primask;
-    uint8_t *data = NULL;
-    uint16_t length = 0U;
+    uint8_t *debug_data = NULL;
+    uint16_t debug_length = 0U;
+    uint8_t *bt_data = NULL;
+    uint16_t bt_length = 0U;
     HAL_StatusTypeDef status;
 
     if (!s_initialized)
@@ -218,24 +237,47 @@ void BSP_DebugUart_Process(void)
     if ((!s_dma_busy) && (s_count > 0U))
     {
         s_dma_busy = true;
-        data = s_queue[s_tail].data;
-        length = s_queue[s_tail].length;
+        debug_data = s_queue[s_tail].data;
+        debug_length = s_queue[s_tail].length;
+    }
+
+    if ((!s_bt_it_busy) && (s_bt_count > 0U))
+    {
+        s_bt_it_busy = true;
+        bt_data = s_bt_queue[s_bt_tail].data;
+        bt_length = s_bt_queue[s_bt_tail].length;
     }
 
     DebugUart_ExitCritical(primask);
 
-    if ((data == NULL) || (length == 0U))
+    if ((debug_data != NULL) && (debug_length > 0U))
     {
-        return;
+        status = HAL_UART_Transmit_DMA(
+            &huart1,
+            debug_data,
+            debug_length);
+
+        if (status != HAL_OK)
+        {
+            primask = DebugUart_EnterCritical();
+            s_dma_busy = false;
+            DebugUart_ExitCritical(primask);
+        }
     }
 
-    status = HAL_UART_Transmit_DMA(&huart1, data, length);
-
-    if (status != HAL_OK)
+    if ((bt_data != NULL) && (bt_length > 0U))
     {
-        primask = DebugUart_EnterCritical();
-        s_dma_busy = false;
-        DebugUart_ExitCritical(primask);
+        status = HAL_UART_Transmit_IT(
+            &huart2,
+            bt_data,
+            bt_length);
+
+        if (status != HAL_OK)
+        {
+            primask = DebugUart_EnterCritical();
+            s_bt_it_busy = false;
+            DebugUart_ExitCritical(primask);
+        }
     }
 }
 
@@ -243,20 +285,36 @@ void BSP_DebugUart_TxCpltCallback(UART_HandleTypeDef *huart)
 {
     uint32_t primask;
 
-    if ((!s_initialized) || (huart != &huart1))
+    if (!s_initialized)
     {
         return;
     }
 
     primask = DebugUart_EnterCritical();
 
-    if (s_dma_busy && (s_count > 0U))
+    if (huart == &huart1)
     {
-        s_tail = DebugUart_NextIndex(s_tail);
-        s_count--;
+        if (s_dma_busy && (s_count > 0U))
+        {
+            s_tail = DebugUart_NextIndex(s_tail);
+            s_count--;
+        }
+        s_dma_busy = false;
     }
-
-    s_dma_busy = false;
+    else if (huart == &huart2)
+    {
+        if (s_bt_it_busy && (s_bt_count > 0U))
+        {
+            s_bt_tail = DebugUart_NextIndex(s_bt_tail);
+            s_bt_count--;
+        }
+        s_bt_it_busy = false;
+    }
+    else
+    {
+        DebugUart_ExitCritical(primask);
+        return;
+    }
 
     DebugUart_ExitCritical(primask);
 
@@ -267,7 +325,8 @@ void BSP_DebugUart_ErrorCallback(UART_HandleTypeDef *huart)
 {
     uint32_t primask;
 
-    if ((!s_initialized) || (huart != &huart1))
+    if ((!s_initialized) ||
+        ((huart != &huart1) && (huart != &huart2)))
     {
         return;
     }
@@ -276,14 +335,26 @@ void BSP_DebugUart_ErrorCallback(UART_HandleTypeDef *huart)
 
     primask = DebugUart_EnterCritical();
 
-    if (s_dma_busy && (s_count > 0U))
+    if (huart == &huart1)
     {
-        s_tail = DebugUart_NextIndex(s_tail);
-        s_count--;
-        s_dropped_count++;
+        if (s_dma_busy && (s_count > 0U))
+        {
+            s_tail = DebugUart_NextIndex(s_tail);
+            s_count--;
+            s_dropped_count++;
+        }
+        s_dma_busy = false;
     }
-
-    s_dma_busy = false;
+    else
+    {
+        if (s_bt_it_busy && (s_bt_count > 0U))
+        {
+            s_bt_tail = DebugUart_NextIndex(s_bt_tail);
+            s_bt_count--;
+            s_dropped_count++;
+        }
+        s_bt_it_busy = false;
+    }
 
     DebugUart_ExitCritical(primask);
 
@@ -292,7 +363,7 @@ void BSP_DebugUart_ErrorCallback(UART_HandleTypeDef *huart)
 
 bool BSP_DebugUart_IsBusy(void)
 {
-    return s_dma_busy;
+    return s_dma_busy || s_bt_it_busy;
 }
 
 uint32_t BSP_DebugUart_GetDroppedCount(void)
@@ -320,6 +391,17 @@ void BSP_DebugUart_ClearPending(void)
     {
         s_count = 0U;
         s_head = s_tail;
+    }
+
+    if (s_bt_it_busy && (s_bt_count > 0U))
+    {
+        s_bt_count = 1U;
+        s_bt_head = DebugUart_NextIndex(s_bt_tail);
+    }
+    else
+    {
+        s_bt_count = 0U;
+        s_bt_head = s_bt_tail;
     }
 
     DebugUart_ExitCritical(primask);

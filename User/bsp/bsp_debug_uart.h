@@ -12,14 +12,14 @@ extern "C" {
 #include "stm32f4xx_hal.h"
 
 /**
- * @brief 初始化调试串口 DMA 发送模块。
+ * @brief 初始化 USART1 DMA 与 USART2 蓝牙镜像发送模块。
  *
- * 当前固定使用 USART1（PA9/PA10，115200 8N1）。
- * 调用前必须完成 MX_DMA_Init() 和 MX_USART1_UART_Init()，并在
- * CubeMX 中为 USART1_TX 配置 DMA Normal 模式。
+ * Debug 使用 USART1（PA9/PA10），蓝牙镜像使用 USART2（PA2/PA3），
+ * 两者均为 115200 8N1。调用前必须完成 MX_DMA_Init()、USART1 和
+ * USART2 初始化，并为 USART1_TX 配置 DMA Normal 模式。
  *
- * @return true  USART1 及 TX DMA 配置有效。
- * @return false USART1 未初始化或未关联 TX DMA。
+ * @return true  USART1/TX DMA 与 USART2 配置有效。
+ * @return false 任一日志串口配置无效。
  */
 bool BSP_DebugUart_Init(void);
 
@@ -29,7 +29,7 @@ bool BSP_DebugUart_Init(void);
 bool BSP_DebugUart_IsInitialized(void);
 
 /**
- * @brief 通过 USART1 TX DMA 排队发送一段原始数据。
+ * @brief 将原始数据同时排入 USART1 DMA 和 USART2 蓝牙发送队列。
  *
  * 本函数只复制数据到内部静态队列，不等待串口发送完成。
  * 队列已满时返回 false，并增加丢弃计数。
@@ -51,7 +51,7 @@ bool BSP_DebugUart_Write(const uint8_t *data, size_t length);
 int BSP_Debug_Printf(const char *format, ...);
 
 /**
- * @brief 尝试启动下一笔 DMA 发送。
+ * @brief 尝试启动下一笔 USART1 DMA 和 USART2 中断发送。
  */
 void BSP_DebugUart_Process(void);
 
@@ -66,7 +66,7 @@ void BSP_DebugUart_TxCpltCallback(UART_HandleTypeDef *huart);
 void BSP_DebugUart_ErrorCallback(UART_HandleTypeDef *huart);
 
 /**
- * @brief 当前是否有一笔 DMA 正在发送。
+ * @brief 当前任一日志串口是否正在发送。
  */
 bool BSP_DebugUart_IsBusy(void);
 
