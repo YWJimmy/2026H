@@ -325,7 +325,7 @@ bool Task2LapStop_Start(uint32_t start_timestamp_ms)
 
 Task2LapStopResult_t Task2LapStop_Update(uint32_t now_ms)
 {
-    bool middle_four_black = false;
+    bool parking_line_black = false;
     bool has_new_line_result = false;
     bool has_new_sensor_frame = false;
     bool distance_stop_completed;
@@ -381,10 +381,12 @@ Task2LapStopResult_t Task2LapStop_Update(uint32_t now_ms)
                 else
                 {
                     has_new_line_result = true;
-                    middle_four_black =
+                    parking_line_black =
                         ((s_line_result_snapshot.black_mask &
-                          TASK2_A_LINE_CENTER_MASK) ==
-                         TASK2_A_LINE_CENTER_MASK);
+                          TASK2_A_LINE_MIDDLE_MASK) ==
+                         TASK2_A_LINE_MIDDLE_MASK) &&
+                        ((s_line_result_snapshot.black_mask &
+                          TASK2_A_LINE_SIDE_MASK) != 0U);
 
                     if (!LineFollowControl_Submit(
                             &s_line_result_snapshot) &&
@@ -481,7 +483,7 @@ Task2LapStopResult_t Task2LapStop_Update(uint32_t now_ms)
     }
 
     if ((s_state == TASK2_STATE_PREDECEL) &&
-        has_new_line_result && middle_four_black)
+        has_new_line_result && parking_line_black)
     {
         if (!s_line_candidate)
         {
