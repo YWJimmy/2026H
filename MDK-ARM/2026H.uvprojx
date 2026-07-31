@@ -428,6 +428,16 @@
               <FileType>1</FileType>
               <FilePath>..\User\bsp\bsp_vision_uart.c</FilePath>
             </File>
+            <File>
+              <FileName>bsp_key.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\bsp\bsp_key.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_oled.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\bsp\bsp_oled.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -502,6 +512,11 @@
               <FileName>test_chassis_ramp.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\test\test_chassis_ramp.c</FilePath>
+            </File>
+            <File>
+              <FileName>test_oled_key.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\test\test_oled_key.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -724,6 +739,11 @@
         <Group>
           <GroupName>User/module</GroupName>
           <Files>
+            <File>
+              <FileName>task_menu_ui.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\module\task_menu_ui.c</FilePath>
+            </File>
             <File>
               <FileName>line_follow_control.c</FileName>
               <FileType>1</FileType>
