@@ -27,8 +27,8 @@ MAX_ASPECT_RATIO = 2.80
 # 1280x960 output system (the 640x480 preview coordinates are doubled).
 # Keep horizontal margins outside the measured ball travel endpoints
 # cx=153 and cx=1160 so endpoint jitter is not rejected.
-PIPE_ROI_X_MIN = 100
-PIPE_ROI_X_MAX = 1200
+PIPE_ROI_X_MIN = 50
+PIPE_ROI_X_MAX = 1250
 PIPE_CENTER_SLOPE = -0.034
 PIPE_CENTER_INTERCEPT = 437.0
 PIPE_ROI_HALF_HEIGHT = 70.0
