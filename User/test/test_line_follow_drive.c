@@ -117,7 +117,8 @@ static void Test_LineFollowDrive_PrintStatus(void)
 
     (void)BSP_Debug_Printf(
         "LFD,R=%u,SP=%u,M=%s,X=%s,LS=%s,MASK=0x%02X,"
-        "E=%d,DE=%d,B=%ld,C=%ld,T=%ld/%ld,AGE=%lu\r\n",
+        "RE=%d,E=%d,DE=%d,B=%ld,CT=%ld,C=%ld,"
+        "T=%ld/%ld,CENT=%lu,AGE=%lu\r\n",
         control.running ? 1U : 0U,
         control.stopping ? 1U : 0U,
         LineFollowControl_ModeName(control.mode),
@@ -125,22 +126,27 @@ static void Test_LineFollowDrive_PrintStatus(void)
             control.stop_reason),
         LineFollow_StateName(control.line_state),
         (unsigned int)control.black_mask,
+        (int)control.raw_error,
         (int)control.error,
         (int)control.error_delta,
         (long)control.base_speed_mm_s,
+        (long)control.correction_target_mm_s,
         (long)control.correction_mm_s,
         (long)control.left_target_mm_s,
         (long)control.right_target_mm_s,
+        (unsigned long)control.center_confirmed_ms,
         (unsigned long)control.state_elapsed_ms);
 
     if (Chassis_GetStatus(&chassis))
     {
         (void)BSP_Debug_Printf(
-            "LFC,S=%lu,MODE=%s,CMD=%ld/%ld,RMP=%ld/%ld,"
-            "MEA=%ld/%ld,F=%ld,T=%ld,AF=%ld,AT=%ld,"
-            "PWM=%d/%d,A=%u,STOP=%u,V=%u,OVR=%lu\r\n",
+            "LFC,S=%lu,MODE=%s,LF=%u,CMD=%ld/%ld,RMP=%ld/%ld,"
+            "MEA=%ld/%ld,F=%ld,T=%ld,TC=%ld,TR=%ld,"
+            "AF=%ld,AT=%ld,PWM=%d/%d,A=%u,STOP=%u,V=%u,"
+            "OVR=%lu\r\n",
             (unsigned long)chassis.control_sequence,
             Chassis_MotionModeName(chassis.motion_mode),
+            chassis.line_follow_active ? 1U : 0U,
             (long)chassis.left_command_mm_s,
             (long)chassis.right_command_mm_s,
             (long)chassis.left_target_mm_s,
@@ -149,6 +155,8 @@ static void Test_LineFollowDrive_PrintStatus(void)
             (long)chassis.right_measured_mm_s,
             (long)chassis.forward_target_mm_s,
             (long)chassis.turn_target_mm_s,
+            (long)chassis.line_follow_turn_command_mm_s,
+            (long)chassis.line_follow_turn_ramped_mm_s,
             (long)chassis.forward_accel_mm_s2,
             (long)chassis.turn_accel_mm_s2,
             (int)chassis.left_pwm,
@@ -207,10 +215,12 @@ bool Test_LineFollowDrive_Init(void)
 
     (void)BSP_Debug_Printf(
         "LFD,CFG=BASE_360_TO_120,MAX=500,"
-        "KP_Q10=%ld,KD_Q10=%ld,LOST=%lu,BLACK=%lu,"
-        "REVERSE=0,PROFILE=JERK_LIMITED\r\n",
+        "KP_Q10=%ld,KD_Q10=%ld,MEDIAN=3,DB=500,"
+        "CENTER_MS=%lu,LOST=%lu,BLACK=%lu,"
+        "REVERSE=0,PROFILE=BASE_S_CURVE_FAST_TURN\r\n",
         (long)LINE_FOLLOW_CONTROL_KP_Q10,
         (long)LINE_FOLLOW_CONTROL_KD_Q10,
+        (unsigned long)LINE_FOLLOW_CONTROL_START_CONFIRM_MS,
         (unsigned long)LINE_FOLLOW_CONTROL_LOST_TIMEOUT_MS,
         (unsigned long)LINE_FOLLOW_CONTROL_ALL_BLACK_TIMEOUT_MS);
 

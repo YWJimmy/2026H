@@ -29,13 +29,20 @@
  * 正常前进速度变化较慢，减小滚球平台的纵向冲击；
  * 转向轴保持较高响应，避免巡线方向修正过慢。
  */
-#define CHASSIS_PROFILE_FORWARD_ACCEL_MM_S2       ((int32_t)300)
-#define CHASSIS_PROFILE_FORWARD_DECEL_MM_S2       ((int32_t)450)
-#define CHASSIS_PROFILE_FORWARD_ACCEL_JERK_MM_S3  ((int32_t)1500)
-#define CHASSIS_PROFILE_FORWARD_DECEL_JERK_MM_S3  ((int32_t)2250)
+#define CHASSIS_PROFILE_FORWARD_ACCEL_MM_S2       ((int32_t)220)
+#define CHASSIS_PROFILE_FORWARD_DECEL_MM_S2       ((int32_t)350)
+#define CHASSIS_PROFILE_FORWARD_ACCEL_JERK_MM_S3  ((int32_t)1100)
+#define CHASSIS_PROFILE_FORWARD_DECEL_JERK_MM_S3  ((int32_t)1800)
 
 #define CHASSIS_PROFILE_TURN_ACCEL_MM_S2          ((int32_t)1000)
 #define CHASSIS_PROFILE_TURN_JERK_MM_S3           ((int32_t)5000)
+
+/*
+ * 巡线专用双通道：基础速度继续走慢速S曲线，转向修正走快速限速率。
+ * 该通道只允许非负轮速，并使用独立的巡线轮速上限。
+ */
+#define CHASSIS_LINE_FOLLOW_MAX_WHEEL_SPEED_MM_S  ((int32_t)500)
+#define CHASSIS_LINE_FOLLOW_TURN_SLEW_MM_S2        ((int32_t)6000)
 
 /* 普通命令0/0使用同比例柔和停车。 */
 #define CHASSIS_PROFILE_SOFT_STOP_DECEL_MM_S2     ((int32_t)600)

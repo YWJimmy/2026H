@@ -105,6 +105,12 @@ bool ChassisSpeedProfile_RequestStop(
     ChassisSpeedProfile_t *profile,
     ChassisSpeedProfileMode_t stop_mode);
 
+/* 将规划器状态同步到外部已生成的实际左右轮目标。 */
+bool ChassisSpeedProfile_SynchronizeOutputMmps(
+    ChassisSpeedProfile_t *profile,
+    int32_t left_mm_s,
+    int32_t right_mm_s);
+
 bool ChassisSpeedProfile_Update(
     ChassisSpeedProfile_t *profile,
     uint16_t dt_ms);

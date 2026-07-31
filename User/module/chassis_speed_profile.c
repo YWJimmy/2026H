@@ -707,6 +707,47 @@ bool ChassisSpeedProfile_RequestStop(
     return true;
 }
 
+bool ChassisSpeedProfile_SynchronizeOutputMmps(
+    ChassisSpeedProfile_t *profile,
+    int32_t left_mm_s,
+    int32_t right_mm_s)
+{
+    int32_t maximum;
+
+    if ((profile == NULL) || (!profile->initialized))
+    {
+        return false;
+    }
+
+    maximum = profile->config.max_wheel_speed_mm_s;
+    left_mm_s = Profile_ClampI32(left_mm_s, -maximum, maximum);
+    right_mm_s = Profile_ClampI32(right_mm_s, -maximum, maximum);
+
+    profile->output_left_q16 = Profile_ToQ16(left_mm_s);
+    profile->output_right_q16 = Profile_ToQ16(right_mm_s);
+    profile->command_left_q16 = profile->output_left_q16;
+    profile->command_right_q16 = profile->output_right_q16;
+    profile->pending_left_q16 = profile->output_left_q16;
+    profile->pending_right_q16 = profile->output_right_q16;
+
+    profile->left_axis.speed_q16 = profile->output_left_q16;
+    profile->right_axis.speed_q16 = profile->output_right_q16;
+    profile->left_axis.acceleration_q16 = 0;
+    profile->right_axis.acceleration_q16 = 0;
+
+    profile->stop_axis.speed_q16 = 0;
+    profile->stop_axis.acceleration_q16 = 0;
+    profile->stop_start_left_q16 = 0;
+    profile->stop_start_right_q16 = 0;
+    profile->stop_start_reference_q16 = 0;
+
+    profile->mode = ((left_mm_s == 0) && (right_mm_s == 0)) ?
+        CHASSIS_SPEED_PROFILE_MODE_IDLE :
+        CHASSIS_SPEED_PROFILE_MODE_DRIVE;
+    profile->active = false;
+    return true;
+}
+
 bool ChassisSpeedProfile_Update(
     ChassisSpeedProfile_t *profile,
     uint16_t dt_ms)

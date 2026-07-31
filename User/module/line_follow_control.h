@@ -46,10 +46,12 @@ typedef struct
     LineFollowState_t line_state;
 
     uint8_t black_mask;
+    int16_t raw_error;
     int16_t error;
     int16_t error_delta;
 
     int32_t base_speed_mm_s;
+    int32_t correction_target_mm_s;
     int32_t correction_mm_s;
     int32_t left_target_mm_s;
     int32_t right_target_mm_s;
@@ -58,6 +60,7 @@ typedef struct
 
     uint32_t line_sequence;
     uint32_t state_elapsed_ms;
+    uint32_t center_confirmed_ms;
     uint32_t timestamp_ms;
 } LineFollowControlStatus_t;
 

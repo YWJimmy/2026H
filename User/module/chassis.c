@@ -24,6 +24,12 @@ static ChassisStatus_t s_status;
 static uint32_t s_last_control_ms = 0U;
 static uint16_t s_stopped_stable_ms = 0U;
 
+/* 巡线专用双通道状态：基础速度走S曲线，转向修正快速限速率。 */
+static bool s_line_follow_active = false;
+static int32_t s_line_follow_turn_command_mm_s = 0;
+static int32_t s_line_follow_turn_ramped_mm_s = 0;
+static int32_t s_line_follow_turn_applied_mm_s = 0;
+
 static int32_t Chassis_DivideRounded(int64_t numerator,
                                      int64_t denominator)
 {
@@ -70,6 +76,75 @@ static int32_t Chassis_ClampCps(int64_t speed_cps)
     }
 
     return (int32_t)speed_cps;
+}
+
+static int32_t Chassis_ClampRangeI32(
+    int32_t value,
+    int32_t minimum,
+    int32_t maximum)
+{
+    if (value < minimum)
+    {
+        return minimum;
+    }
+
+    if (value > maximum)
+    {
+        return maximum;
+    }
+
+    return value;
+}
+
+static int32_t Chassis_ApproachI32(
+    int32_t current,
+    int32_t target,
+    int32_t step)
+{
+    int64_t difference;
+
+    if (step <= 0)
+    {
+        return target;
+    }
+
+    difference = (int64_t)target - (int64_t)current;
+    if (difference > (int64_t)step)
+    {
+        return current + step;
+    }
+
+    if (difference < -(int64_t)step)
+    {
+        return current - step;
+    }
+
+    return target;
+}
+
+static int32_t Chassis_RateStepMmps(
+    int32_t rate_mm_s2,
+    uint16_t dt_ms)
+{
+    int64_t step;
+
+    if ((rate_mm_s2 <= 0) || (dt_ms == 0U))
+    {
+        return 0;
+    }
+
+    step = ((int64_t)rate_mm_s2 * (int64_t)dt_ms + 999LL) /
+           1000LL;
+    if (step < 1LL)
+    {
+        step = 1LL;
+    }
+    if (step > INT32_MAX)
+    {
+        return INT32_MAX;
+    }
+
+    return (int32_t)step;
 }
 
 static int32_t Chassis_AbsI32(int32_t value)
@@ -209,10 +284,20 @@ static void Chassis_ResetSpeedProfile(void)
     s_status.turn_accel_mm_s2 = 0;
     s_status.stop_reference_mm_s = 0;
     s_status.stop_accel_mm_s2 = 0;
+
+    s_line_follow_active = false;
+    s_line_follow_turn_command_mm_s = 0;
+    s_line_follow_turn_ramped_mm_s = 0;
+    s_line_follow_turn_applied_mm_s = 0;
+    s_status.line_follow_active = false;
+    s_status.line_follow_turn_command_mm_s = 0;
+    s_status.line_follow_turn_ramped_mm_s = 0;
 }
 
 static bool Chassis_UpdateSpeedProfile(uint16_t dt_ms)
 {
+    int32_t left_target_mm_s;
+    int32_t right_target_mm_s;
     int32_t left_target_cps;
     int32_t right_target_cps;
 
@@ -228,11 +313,103 @@ static bool Chassis_UpdateSpeedProfile(uint16_t dt_ms)
         return false;
     }
 
-    left_target_cps = Chassis_ClampCps(
-        Chassis_MmpsToCps(s_profile_status.output_left_mm_s));
+    left_target_mm_s = s_profile_status.output_left_mm_s;
+    right_target_mm_s = s_profile_status.output_right_mm_s;
 
+    if (s_line_follow_active &&
+        (s_profile_status.mode == CHASSIS_SPEED_PROFILE_MODE_DRIVE))
+    {
+        int32_t base_target_mm_s;
+        int32_t turn_step_mm_s;
+        int32_t safe_turn_limit_mm_s;
+        int32_t speed_headroom_mm_s;
+        int32_t previous_turn_mm_s;
+        int32_t turn_accel_mm_s2;
+
+        base_target_mm_s =
+            (s_profile_status.output_left_mm_s +
+             s_profile_status.output_right_mm_s) /
+            2;
+        base_target_mm_s = Chassis_ClampRangeI32(
+            base_target_mm_s,
+            0,
+            CHASSIS_LINE_FOLLOW_MAX_WHEEL_SPEED_MM_S);
+
+        turn_step_mm_s = Chassis_RateStepMmps(
+            CHASSIS_LINE_FOLLOW_TURN_SLEW_MM_S2,
+            dt_ms);
+        s_line_follow_turn_ramped_mm_s = Chassis_ApproachI32(
+            s_line_follow_turn_ramped_mm_s,
+            s_line_follow_turn_command_mm_s,
+            turn_step_mm_s);
+
+        speed_headroom_mm_s =
+            CHASSIS_LINE_FOLLOW_MAX_WHEEL_SPEED_MM_S -
+            base_target_mm_s;
+        safe_turn_limit_mm_s =
+            (base_target_mm_s < speed_headroom_mm_s) ?
+            base_target_mm_s : speed_headroom_mm_s;
+        if (safe_turn_limit_mm_s < 0)
+        {
+            safe_turn_limit_mm_s = 0;
+        }
+
+        previous_turn_mm_s = s_line_follow_turn_applied_mm_s;
+        s_line_follow_turn_applied_mm_s = Chassis_ClampRangeI32(
+            s_line_follow_turn_ramped_mm_s,
+            -safe_turn_limit_mm_s,
+            safe_turn_limit_mm_s);
+
+        left_target_mm_s = base_target_mm_s +
+                           s_line_follow_turn_applied_mm_s;
+        right_target_mm_s = base_target_mm_s -
+                            s_line_follow_turn_applied_mm_s;
+
+        turn_accel_mm_s2 = Chassis_DivideRounded(
+            (int64_t)(s_line_follow_turn_applied_mm_s -
+                      previous_turn_mm_s) *
+            1000LL,
+            (int64_t)dt_ms);
+
+        s_status.forward_target_mm_s = base_target_mm_s;
+        s_status.turn_target_mm_s =
+            s_line_follow_turn_applied_mm_s;
+        s_status.forward_accel_mm_s2 =
+            s_profile_status.forward_accel_mm_s2;
+        s_status.turn_accel_mm_s2 = turn_accel_mm_s2;
+        s_status.stop_reference_mm_s = 0;
+        s_status.stop_accel_mm_s2 = 0;
+        s_status.speed_ramp_active =
+            s_profile_status.active ||
+            (s_line_follow_turn_ramped_mm_s !=
+             s_line_follow_turn_command_mm_s) ||
+            (s_line_follow_turn_applied_mm_s !=
+             s_line_follow_turn_ramped_mm_s);
+        s_status.motion_mode = CHASSIS_MOTION_MODE_DRIVE;
+    }
+    else
+    {
+        s_status.forward_target_mm_s =
+            s_profile_status.forward_speed_mm_s;
+        s_status.turn_target_mm_s =
+            s_profile_status.turn_speed_mm_s;
+        s_status.forward_accel_mm_s2 =
+            s_profile_status.forward_accel_mm_s2;
+        s_status.turn_accel_mm_s2 =
+            s_profile_status.turn_accel_mm_s2;
+        s_status.stop_reference_mm_s =
+            s_profile_status.stop_reference_mm_s;
+        s_status.stop_accel_mm_s2 =
+            s_profile_status.stop_accel_mm_s2;
+        s_status.speed_ramp_active = s_profile_status.active;
+        s_status.motion_mode =
+            Chassis_MapProfileMode(s_profile_status.mode);
+    }
+
+    left_target_cps = Chassis_ClampCps(
+        Chassis_MmpsToCps(left_target_mm_s));
     right_target_cps = Chassis_ClampCps(
-        Chassis_MmpsToCps(s_profile_status.output_right_mm_s));
+        Chassis_MmpsToCps(right_target_mm_s));
 
     if (!WheelSpeedControl_SetTargetCps(
             &s_left_controller,
@@ -248,29 +425,15 @@ static bool Chassis_UpdateSpeedProfile(uint16_t dt_ms)
         return false;
     }
 
-    s_status.left_target_mm_s =
-        s_profile_status.output_left_mm_s;
-    s_status.right_target_mm_s =
-        s_profile_status.output_right_mm_s;
+    s_status.left_target_mm_s = left_target_mm_s;
+    s_status.right_target_mm_s = right_target_mm_s;
     s_status.left_target_cps = left_target_cps;
     s_status.right_target_cps = right_target_cps;
-
-    s_status.forward_target_mm_s =
-        s_profile_status.forward_speed_mm_s;
-    s_status.turn_target_mm_s =
-        s_profile_status.turn_speed_mm_s;
-    s_status.forward_accel_mm_s2 =
-        s_profile_status.forward_accel_mm_s2;
-    s_status.turn_accel_mm_s2 =
-        s_profile_status.turn_accel_mm_s2;
-    s_status.stop_reference_mm_s =
-        s_profile_status.stop_reference_mm_s;
-    s_status.stop_accel_mm_s2 =
-        s_profile_status.stop_accel_mm_s2;
-
-    s_status.speed_ramp_active = s_profile_status.active;
-    s_status.motion_mode =
-        Chassis_MapProfileMode(s_profile_status.mode);
+    s_status.line_follow_active = s_line_follow_active;
+    s_status.line_follow_turn_command_mm_s =
+        s_line_follow_turn_command_mm_s;
+    s_status.line_follow_turn_ramped_mm_s =
+        s_line_follow_turn_applied_mm_s;
 
     return true;
 }
@@ -477,6 +640,31 @@ bool Chassis_IsEnabled(void)
     return s_initialized && s_enabled;
 }
 
+static bool Chassis_LeaveLineFollowMode(void)
+{
+    if (!s_line_follow_active)
+    {
+        return true;
+    }
+
+    if (!ChassisSpeedProfile_SynchronizeOutputMmps(
+            &s_speed_profile,
+            s_status.left_target_mm_s,
+            s_status.right_target_mm_s))
+    {
+        return false;
+    }
+
+    s_line_follow_active = false;
+    s_line_follow_turn_command_mm_s = 0;
+    s_line_follow_turn_ramped_mm_s = 0;
+    s_line_follow_turn_applied_mm_s = 0;
+    s_status.line_follow_active = false;
+    s_status.line_follow_turn_command_mm_s = 0;
+    s_status.line_follow_turn_ramped_mm_s = 0;
+    return true;
+}
+
 bool Chassis_SetWheelSpeedMmps(int32_t left_mm_s,
                                int32_t right_mm_s)
 {
@@ -484,6 +672,11 @@ bool Chassis_SetWheelSpeedMmps(int32_t left_mm_s,
     int32_t clamped_right_mm_s;
 
     if ((!s_initialized) || s_emergency_latched)
+    {
+        return false;
+    }
+
+    if (!Chassis_LeaveLineFollowMode())
     {
         return false;
     }
@@ -514,6 +707,93 @@ bool Chassis_SetWheelSpeedMmps(int32_t left_mm_s,
 
     if ((clamped_left_mm_s != 0) ||
         (clamped_right_mm_s != 0))
+    {
+        s_status.motion_stopped = false;
+        s_stopped_stable_ms = 0U;
+    }
+
+    return true;
+}
+
+bool Chassis_SetLineFollowCommandMmps(int32_t base_mm_s,
+                                      int32_t turn_mm_s)
+{
+    int32_t max_turn_mm_s;
+    int32_t current_left_mm_s;
+    int32_t current_right_mm_s;
+    int32_t left_command_mm_s;
+    int32_t right_command_mm_s;
+
+    if ((!s_initialized) || s_emergency_latched)
+    {
+        return false;
+    }
+
+    base_mm_s = Chassis_ClampRangeI32(
+        base_mm_s,
+        0,
+        CHASSIS_LINE_FOLLOW_MAX_WHEEL_SPEED_MM_S);
+
+    max_turn_mm_s =
+        CHASSIS_LINE_FOLLOW_MAX_WHEEL_SPEED_MM_S - base_mm_s;
+    if (base_mm_s < max_turn_mm_s)
+    {
+        max_turn_mm_s = base_mm_s;
+    }
+    if (max_turn_mm_s < 0)
+    {
+        max_turn_mm_s = 0;
+    }
+
+    turn_mm_s = Chassis_ClampRangeI32(
+        turn_mm_s,
+        -max_turn_mm_s,
+        max_turn_mm_s);
+
+    if (!s_line_follow_active)
+    {
+        current_left_mm_s = s_status.left_target_mm_s;
+        current_right_mm_s = s_status.right_target_mm_s;
+
+        if (!ChassisSpeedProfile_SynchronizeOutputMmps(
+                &s_speed_profile,
+                current_left_mm_s,
+                current_right_mm_s))
+        {
+            return false;
+        }
+
+        s_line_follow_turn_ramped_mm_s =
+            (current_left_mm_s - current_right_mm_s) / 2;
+        s_line_follow_turn_applied_mm_s =
+            s_line_follow_turn_ramped_mm_s;
+        s_line_follow_active = true;
+    }
+
+    if (!ChassisSpeedProfile_SetCommandMmps(
+            &s_speed_profile,
+            base_mm_s,
+            base_mm_s))
+    {
+        return false;
+    }
+
+    s_line_follow_turn_command_mm_s = turn_mm_s;
+    left_command_mm_s = base_mm_s + turn_mm_s;
+    right_command_mm_s = base_mm_s - turn_mm_s;
+
+    s_status.left_command_mm_s = left_command_mm_s;
+    s_status.right_command_mm_s = right_command_mm_s;
+    s_status.left_command_cps =
+        Chassis_MmpsToCps(left_command_mm_s);
+    s_status.right_command_cps =
+        Chassis_MmpsToCps(right_command_mm_s);
+    s_status.forward_command_mm_s = base_mm_s;
+    s_status.turn_command_mm_s = turn_mm_s;
+    s_status.line_follow_active = true;
+    s_status.line_follow_turn_command_mm_s = turn_mm_s;
+
+    if ((base_mm_s != 0) || (turn_mm_s != 0))
     {
         s_status.motion_stopped = false;
         s_stopped_stable_ms = 0U;
@@ -579,6 +859,11 @@ bool Chassis_RequestStop(ChassisStopMode_t mode)
     }
 
     if (s_emergency_latched)
+    {
+        return false;
+    }
+
+    if (!Chassis_LeaveLineFollowMode())
     {
         return false;
     }

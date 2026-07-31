@@ -35,6 +35,7 @@ typedef struct
     bool speed_ramp_active;
     bool motion_stopped;
     bool emergency_latched;
+    bool line_follow_active;
 
     ChassisMotionMode_t motion_mode;
 
@@ -59,6 +60,10 @@ typedef struct
     int32_t turn_accel_mm_s2;
     int32_t stop_reference_mm_s;
     int32_t stop_accel_mm_s2;
+
+    /* 巡线专用快转向通道诊断。 */
+    int32_t line_follow_turn_command_mm_s;
+    int32_t line_follow_turn_ramped_mm_s;
 
     int32_t left_measured_mm_s;
     int32_t right_measured_mm_s;
@@ -105,6 +110,10 @@ bool Chassis_SetWheelSpeedMmps(int32_t left_mm_s,
                                int32_t right_mm_s);
 bool Chassis_SetWheelSpeedCps(int32_t left_cps,
                               int32_t right_cps);
+
+/* 巡线专用：base走慢速S曲线，turn走快速限速率。 */
+bool Chassis_SetLineFollowCommandMmps(int32_t base_mm_s,
+                                      int32_t turn_mm_s);
 
 bool Chassis_SetVelocity(int32_t linear_mm_s,
                          int32_t angular_mrad_s);
