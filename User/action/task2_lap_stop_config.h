@@ -12,8 +12,8 @@
 /* ADC3/4/5 或 ADC4/5/6 为黑；其他通道状态不影响判定。 */
 #define TASK2_A_LINE_ADC345_MASK               ((uint8_t)0x1CU)
 #define TASK2_A_LINE_ADC456_MASK               ((uint8_t)0x38U)
-#define TASK2_A_LINE_CONFIRM_MS                ((uint32_t)50U)
-#define TASK2_A_LINE_MATCH_PERCENT             ((uint32_t)80U)
+#define TASK2_A_LINE_WINDOW_FRAMES             ((uint8_t)5U)
+#define TASK2_A_LINE_REQUIRED_FRAMES           ((uint8_t)3U)
 
 #define TASK2_SENSOR_FORWARD_OFFSET_MM         \
     ((uint32_t)APP_ROUTE_SENSOR_FORWARD_OFFSET_MM)

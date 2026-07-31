@@ -27,8 +27,7 @@ static bool s_initialized = false;
 static Task2State_t s_state = TASK2_STATE_IDLE;
 static uint32_t s_start_ms = 0U;
 static uint32_t s_last_report_ms = 0U;
-static uint32_t s_line_candidate_start_ms = 0U;
-static bool s_line_candidate = false;
+static uint8_t s_line_window_bits = 0U;
 static uint8_t s_line_window_total = 0U;
 static uint8_t s_line_window_matched = 0U;
 static bool s_has_fresh_sensor_frame = false;
@@ -278,8 +277,7 @@ bool Task2LapStop_Start(uint32_t start_timestamp_ms)
     s_state = TASK2_STATE_LAP_RUNNING;
     s_start_ms = start_timestamp_ms;
     s_last_report_ms = start_timestamp_ms;
-    s_line_candidate_start_ms = 0U;
-    s_line_candidate = false;
+    s_line_window_bits = 0U;
     s_line_window_total = 0U;
     s_line_window_matched = 0U;
     s_has_fresh_sensor_frame = false;
@@ -497,69 +495,52 @@ Task2LapStopResult_t Task2LapStop_Update(uint32_t now_ms)
     if ((s_state == TASK2_STATE_PREDECEL) &&
         has_new_line_result)
     {
-        if (!s_line_candidate)
+        if (s_line_window_total >=
+            TASK2_A_LINE_WINDOW_FRAMES)
         {
-            if (parking_line_black)
+            if ((s_line_window_bits & 0x10U) != 0U)
             {
-                s_line_candidate = true;
-                s_line_candidate_start_ms = now_ms;
-                s_line_window_total = 1U;
-                s_line_window_matched = 1U;
-                (void)BSP_Debug_Printf(
-                    "T2,A_CAND=1,DIST=%lu,MASK=0x%02X,N=%u,WIN=%lu,PCT=%lu\r\n",
-                    (unsigned long)s_distance_snapshot.traveled_mm,
-                    (unsigned int)s_line_result_snapshot.black_mask,
-                    (unsigned int)s_line_result_snapshot.black_count,
-                    (unsigned long)TASK2_A_LINE_CONFIRM_MS,
-                    (unsigned long)TASK2_A_LINE_MATCH_PERCENT);
+                s_line_window_matched--;
             }
         }
         else
         {
-            if (s_line_window_total < UINT8_MAX)
-            {
-                s_line_window_total++;
-            }
-            if (parking_line_black &&
-                (s_line_window_matched < UINT8_MAX))
-            {
-                s_line_window_matched++;
-            }
+            s_line_window_total++;
+        }
 
-            if ((uint32_t)(now_ms - s_line_candidate_start_ms) >=
-                TASK2_A_LINE_CONFIRM_MS)
+        s_line_window_bits = (uint8_t)(
+            ((s_line_window_bits << 1U) & 0x1FU) |
+            (parking_line_black ? 1U : 0U));
+
+        if (parking_line_black)
+        {
+            s_line_window_matched++;
+            if (s_line_window_matched == 1U)
             {
                 (void)BSP_Debug_Printf(
-                    "T2,A_WIN=1,HIT=%u/%u,OK=%u\r\n",
-                    (unsigned int)s_line_window_matched,
-                    (unsigned int)s_line_window_total,
-                    (((uint32_t)s_line_window_matched * 100U) >=
-                     ((uint32_t)s_line_window_total *
-                      TASK2_A_LINE_MATCH_PERCENT)) ? 1U : 0U);
+                    "T2,A_CAND=1,DIST=%lu,MASK=0x%02X,N=%u,WIN=%u,NEED=%u\r\n",
+                    (unsigned long)s_distance_snapshot.traveled_mm,
+                    (unsigned int)s_line_result_snapshot.black_mask,
+                    (unsigned int)s_line_result_snapshot.black_count,
+                    (unsigned int)TASK2_A_LINE_WINDOW_FRAMES,
+                    (unsigned int)TASK2_A_LINE_REQUIRED_FRAMES);
+            }
+        }
 
-                if (((uint32_t)s_line_window_matched * 100U) >=
-                    ((uint32_t)s_line_window_total *
-                     TASK2_A_LINE_MATCH_PERCENT))
-                {
-                    if (!Task2_StartPositionApproach(
-                            &s_distance_snapshot))
-                    {
-                        return Task2_Fault(12U);
-                    }
-                }
-                else if (parking_line_black)
-                {
-                    s_line_candidate_start_ms = now_ms;
-                    s_line_window_total = 1U;
-                    s_line_window_matched = 1U;
-                }
-                else
-                {
-                    s_line_candidate = false;
-                    s_line_candidate_start_ms = 0U;
-                    s_line_window_total = 0U;
-                    s_line_window_matched = 0U;
-                }
+        if ((s_line_window_total >=
+             TASK2_A_LINE_WINDOW_FRAMES) &&
+            (s_line_window_matched >=
+             TASK2_A_LINE_REQUIRED_FRAMES))
+        {
+            (void)BSP_Debug_Printf(
+                "T2,A_WIN=1,HIT=%u/%u,OK=1\r\n",
+                (unsigned int)s_line_window_matched,
+                (unsigned int)s_line_window_total);
+
+            if (!Task2_StartPositionApproach(
+                    &s_distance_snapshot))
+            {
+                return Task2_Fault(12U);
             }
         }
     }
