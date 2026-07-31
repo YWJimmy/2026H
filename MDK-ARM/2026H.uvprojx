@@ -834,6 +834,11 @@
               <FileType>1</FileType>
               <FilePath>..\User\action\task4_ab_hold.c</FilePath>
             </File>
+            <File>
+              <FileName>task5_lap_hold.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\action\task5_lap_hold.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
