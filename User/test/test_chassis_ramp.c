@@ -8,7 +8,7 @@
 
 #include <stdint.h>
 
-#define TEST_CHASSIS_RAMP_REPORT_MS       ((uint32_t)10U)
+#define TEST_CHASSIS_RAMP_REPORT_MS       ((uint32_t)50U)
 #define TEST_CHASSIS_RAMP_DEBOUNCE_MS     ((uint32_t)30U)
 
 typedef struct
