@@ -19,6 +19,59 @@ static uint32_t s_last_print_ms = 0U;
 static uint32_t s_last_heartbeat_ms = 0U;
 static uint32_t s_last_event_sequence = 0U;
 static uint32_t s_last_servo_error_count = 0U;
+static uint32_t s_target_hold_start_ms = 0U;
+static bool s_target_hold_active = false;
+
+static int32_t Test_BallBalance_AbsI32(int32_t value)
+{
+    return (value < 0) ? -value : value;
+}
+
+static bool Test_BallBalance_UpdateTargetCycle(
+    const BallBalanceControlStatus_t *control,
+    uint32_t now_ms)
+{
+    int32_t next_target;
+
+    if ((control == NULL) ||
+        !control->has_target ||
+        !control->vision_data_valid ||
+        (Test_BallBalance_AbsI32(control->error) >
+         BALL_BALANCE_DEADZONE_PX))
+    {
+        s_target_hold_active = false;
+        return true;
+    }
+
+    if (!s_target_hold_active)
+    {
+        s_target_hold_start_ms = now_ms;
+        s_target_hold_active = true;
+        return true;
+    }
+
+    if ((uint32_t)(now_ms - s_target_hold_start_ms) <
+        BALL_BALANCE_TARGET_HOLD_MS)
+    {
+        return true;
+    }
+
+    next_target = (control->target_x == BALL_BALANCE_TARGET_CX_A)
+        ? BALL_BALANCE_TARGET_CX_B
+        : BALL_BALANCE_TARGET_CX_A;
+
+    s_target_hold_active = false;
+
+    if (!BallBalanceControl_SetTargetX(next_target))
+    {
+        return false;
+    }
+
+    (void)BSP_Debug_Printf(
+        "BALL_BAL,CYCLE,NEW_TARGET=%ld\r\n",
+        (long)next_target);
+    return true;
+}
 
 static void Test_BallBalance_PrintEvent(
     const BallBalanceControlStatus_t *control)
@@ -47,6 +100,8 @@ bool Test_BallBalance_Init(void)
     s_vision_ok = false;
     s_last_event_sequence = 0U;
     s_last_servo_error_count = 0U;
+    s_target_hold_start_ms = 0U;
+    s_target_hold_active = false;
 
     if (!BSP_DebugUart_Init())
     {
@@ -55,11 +110,13 @@ bool Test_BallBalance_Init(void)
 
     (void)BSP_Debug_Printf(
         "BALL_BAL,START,ARCH=BSP_MODULE,"
-        "TARGET=%ld,DEADZONE=%ld,KP_Q10=%ld,"
+        "TARGETS=%ld/%ld,HOLD_MS=%lu,DEADZONE=%ld,KP_Q10=%ld,"
         "BRAKE_GAIN=%ld,BRAKE_BASE=%ld,BRAKE_MAX=%ld,"
         "LIMS=PUSH_%u_%u_BRAKE_%u_%u,"
         "STUCK=%ld/%lu\r\n",
-        (long)BALL_BALANCE_TARGET_CX,
+        (long)BALL_BALANCE_TARGET_CX_A,
+        (long)BALL_BALANCE_TARGET_CX_B,
+        (unsigned long)BALL_BALANCE_TARGET_HOLD_MS,
         (long)BALL_BALANCE_DEADZONE_PX,
         (long)BALL_BALANCE_PUSH_KP_Q10,
         (long)BALL_BALANCE_BRAKE_DISTANCE_GAIN,
@@ -145,6 +202,20 @@ void Test_BallBalance_Update(void)
 
     if (have_control_status)
     {
+        if (!Test_BallBalance_UpdateTargetCycle(
+                &control,
+                now_ms))
+        {
+            (void)BSP_Debug_Printf(
+                "ERR,BALL_TARGET_SWITCH\r\n");
+        }
+        else
+        {
+            /* Refresh target/error after a possible cycle switch. */
+            have_control_status =
+                BallBalanceControl_GetStatus(&control);
+        }
+
         if (!control_update_ok &&
             (control.servo_error_count !=
              s_last_servo_error_count))
@@ -210,9 +281,10 @@ void Test_BallBalance_Update(void)
         if (control.has_target)
         {
             (void)BSP_Debug_Printf(
-                "BALL_BAL,CX=%ld,ERR=%ld,SPD=%ld,D=%ld,"
+                "BALL_BAL,CX=%ld,TARGET=%ld,ERR=%ld,SPD=%ld,D=%ld,"
                 "MODE=%s,BOOST=%lu,PULSE=%u\r\n",
                 (long)control.center_x,
+                (long)control.target_x,
                 (long)control.error,
                 (long)control.speed,
                 (long)control.delta_us,

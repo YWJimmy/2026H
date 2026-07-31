@@ -61,9 +61,12 @@ typedef struct
 
 /*
  * 初始化钢球控制模块和舵机BSP。
- * 模块初始化后舵机输出1600 us，不负责初始化Vision模块。
+ * 模块初始化后舵机输出1700 us，不负责初始化Vision模块。
  */
 bool BallBalanceControl_Init(void);
+
+/* Update the requested ball center in the vision X coordinate system. */
+bool BallBalanceControl_SetTargetX(int32_t target_x);
 
 /*
  * 提交Vision模块的最新状态。

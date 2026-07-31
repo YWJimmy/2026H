@@ -160,9 +160,14 @@ static int32_t BallBalance_CalculateControlDelta(void)
     int32_t speed_abs = BallBalance_AbsI32(s_status.speed);
     bool moving_to_target;
 
+    /*
+     * 2ebc854 convention: error = center_x - target_x.
+     * The ball moves toward the target when error and speed have
+     * opposite signs.
+     */
     moving_to_target =
-        ((s_status.error > 0) && (s_status.speed > 0)) ||
-        ((s_status.error < 0) && (s_status.speed < 0));
+        ((s_status.error > 0) && (s_status.speed < 0)) ||
+        ((s_status.error < 0) && (s_status.speed > 0));
 
     if (moving_to_target &&
         (error_abs <
@@ -202,7 +207,7 @@ static bool BallBalance_ProcessFoundTarget(uint16_t center_x)
 
     s_status.center_x = (int32_t)center_x;
     s_status.error =
-        BALL_BALANCE_TARGET_CX - s_status.center_x;
+        s_status.center_x - s_status.target_x;
     s_status.has_target = true;
     s_status.lost_frames = 0U;
     s_vision_timeout_reported = false;
@@ -312,7 +317,7 @@ bool BallBalanceControl_Init(void)
 
     s_status.mode = BALL_BALANCE_MODE_IDLE;
     s_status.last_event = BALL_BALANCE_EVENT_NONE;
-    s_status.target_x = BALL_BALANCE_TARGET_CX;
+    s_status.target_x = BALL_BALANCE_TARGET_CX_A;
     s_status.servo_pulse_us =
         BALL_BALANCE_SERVO_CENTER_US;
     s_status.timestamp_ms = HAL_GetTick();
@@ -338,6 +343,26 @@ bool BallBalanceControl_Init(void)
     s_status.servo_enabled = true;
     s_status.mode = BALL_BALANCE_MODE_WAITING_VISION;
     s_status.servo_pulse_us = BSP_Servo_GetPulseUs();
+    return true;
+}
+
+bool BallBalanceControl_SetTargetX(int32_t target_x)
+{
+    if (!s_initialized ||
+        (target_x < 0) ||
+        (target_x > BALL_BALANCE_VISION_X_MAX))
+    {
+        return false;
+    }
+
+    if (target_x == s_status.target_x)
+    {
+        return true;
+    }
+
+    s_status.target_x = target_x;
+    s_status.error = s_status.center_x - s_status.target_x;
+    s_status.stuck_boost_us = 0U;
     return true;
 }
 
