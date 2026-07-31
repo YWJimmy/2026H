@@ -492,9 +492,17 @@ void MainApp_Update(void)
                         requested_task,
                         now_ms))
                 {
+                    uint32_t fault_detail = 0U;
+
+                    if (AppTaskManager_GetStatus(
+                            &task_status))
+                    {
+                        fault_detail =
+                            task_status.fault_detail;
+                    }
                     MainApp_EnterFault(
                         APP_FAULT_TASK_START,
-                        0U);
+                        fault_detail);
                     break;
                 }
 

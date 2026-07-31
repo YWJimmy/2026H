@@ -28,7 +28,9 @@ static const uint8_t s_channel_map[LINE_SENSOR_COUNT] =
 #endif
 
 static LineSensorFrame_t s_frame;
+#if LINE_SENSOR_BACKEND == LINE_SENSOR_BACKEND_ADC8
 static uint8_t s_previous_black_mask = 0U;
+#endif
 static uint32_t s_last_bsp_sequence = 0U;
 static bool s_initialized = false;
 static bool s_running = false;
@@ -104,7 +106,9 @@ bool LineSensor_Init(void)
     s_initialized = false;
     s_running = false;
     s_has_frame = false;
+#if LINE_SENSOR_BACKEND == LINE_SENSOR_BACKEND_ADC8
     s_previous_black_mask = 0U;
+#endif
     s_last_bsp_sequence = 0U;
     memset(&s_frame, 0, sizeof(s_frame));
 
@@ -156,7 +160,16 @@ bool LineSensor_Start(void)
 #elif LINE_SENSOR_BACKEND == LINE_SENSOR_BACKEND_UART8
     if (!BSP_LineUart_IsInitialized())
     {
-        return false;
+        /*
+         * BSP_LineUart_Stop() intentionally aborts UART activity and marks
+         * the backend uninitialized.  A task reset performs that safe stop
+         * before the next start, so restore the backend here to make the
+         * LineSensor Stop -> Start lifecycle restartable.
+         */
+        if (!BSP_LineUart_Init())
+        {
+            return false;
+        }
     }
 #endif
 
@@ -317,7 +330,6 @@ bool LineSensor_Update(void)
         }
 
         next_frame.black_mask = next_black_mask;
-        s_previous_black_mask = next_black_mask;
         s_last_bsp_sequence = snapshot.sequence;
     }
 #endif
@@ -418,6 +430,6 @@ void LineSensor_ResetCalibration(void)
 #if LINE_SENSOR_BACKEND == LINE_SENSOR_BACKEND_ADC8
     memcpy(s_white_raw, s_default_white_raw, sizeof(s_white_raw));
     memcpy(s_black_raw, s_default_black_raw, sizeof(s_black_raw));
-#endif
     s_previous_black_mask = 0U;
+#endif
 }

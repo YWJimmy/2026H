@@ -224,6 +224,10 @@ bool Task2LapStop_Start(uint32_t start_timestamp_ms)
         ((s_state != TASK2_STATE_IDLE) &&
          (s_state != TASK2_STATE_FINISHED)))
     {
+        s_fault_detail = 20U;
+        (void)BSP_Debug_Printf(
+            "T2,START_FAIL=STATE,DETAIL=%lu\r\n",
+            (unsigned long)s_fault_detail);
         return false;
     }
 
@@ -232,15 +236,29 @@ bool Task2LapStop_Start(uint32_t start_timestamp_ms)
     if (!LineSensor_Start())
     {
         s_fault_detail = 4U;
+        (void)BSP_Debug_Printf(
+            "T2,START_FAIL=LINE_SENSOR,DETAIL=%lu\r\n",
+            (unsigned long)s_fault_detail);
         return false;
     }
 
     if (!LineFollowControl_SetBaseSpeedRangeMmps(
             LINE_FOLLOW_CONTROL_CENTER_SPEED_MM_S,
-            LINE_FOLLOW_CONTROL_MIN_BASE_SPEED_MM_S) ||
-        !LineFollowControl_Start())
+            LINE_FOLLOW_CONTROL_MIN_BASE_SPEED_MM_S))
     {
         s_fault_detail = 5U;
+        (void)BSP_Debug_Printf(
+            "T2,START_FAIL=SPEED_RANGE,DETAIL=%lu\r\n",
+            (unsigned long)s_fault_detail);
+        return false;
+    }
+
+    if (!LineFollowControl_Start())
+    {
+        s_fault_detail = 6U;
+        (void)BSP_Debug_Printf(
+            "T2,START_FAIL=CONTROL,DETAIL=%lu\r\n",
+            (unsigned long)s_fault_detail);
         return false;
     }
 
