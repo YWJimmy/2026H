@@ -12,8 +12,8 @@
  * Target ball center X in 1280x960 coordinates.
  * Cyclic: hold at each target for HOLD_MS, then switch.
  */
-#define BALL_TARGET_CX_A        1000
-#define BALL_TARGET_CX_B        600
+#define BALL_TARGET_CX_A        447
+#define BALL_TARGET_CX_B        869
 #define BALL_CYCLE_HOLD_MS      5000U
 
 /*
@@ -47,17 +47,17 @@
 /*
  * Maximum brake pulse offset (us).
  */
-#define BALL_BRAKE_MAX_US       120U
-
 /*
- * Stuck detection: if |speed| < this for consecutive frames while
- * outside dead zone, gradually increase push force.
+ * Stuck detection: wait N frames, then apply one large jump.
+ * Normal push is gentle; big kick only when truly stuck.
  */
 #define BALL_STUCK_SPEED_PX     3
-#define BALL_STUCK_BOOST_US     5U
+#define BALL_STUCK_WAIT         15
+#define BALL_STUCK_BOOST_US     100U
+#define BALL_STUCK_HOLD          5
 
 /*
- * Dead zone: |error| <= 30 → ball within 470..530, hold level.
+ * Dead zone: |error| <= 15.
  */
 #define BALL_DEADZONE_PX        30
 
@@ -90,7 +90,8 @@ static int32_t  s_prev_cx            = 0;
 static int32_t  s_speed              = 0;
 static bool     s_has_target         = false;
 static bool     s_braking            = false;
-static uint32_t s_stuck_boost        = 0U;
+static uint32_t s_stuck_counter       = 0U;
+static uint32_t s_stuck_hold_frames    = 0U;
 static uint16_t s_target_cx          = BALL_TARGET_CX_A;
 static uint32_t s_cycle_start_ms     = 0U;
 
@@ -116,7 +117,8 @@ bool Test_BallBalance_Init(void)
     s_prev_cx           = 0;
     s_speed             = 0;
     s_braking           = false;
-    s_stuck_boost       = 0U;
+    s_stuck_counter     = 0U;
+    s_stuck_hold_frames = 0U;
     s_target_cx         = BALL_TARGET_CX_A;
     s_cycle_start_ms    = 0U;
 
@@ -129,7 +131,7 @@ bool Test_BallBalance_Init(void)
         "BALL_BAL,START,MODE=CYCLE_%u_%u_HOLD_%lums,"
         "DEADZONE=%d,"
         "PUSH_KP=%.2f,BRAKE_GAIN=%.1f,"
-        "BRAKE_BASE=%u,BRAKE_MAX=%u,"
+        "BRAKE_BASE=%u,SPEED_FACT=%.1f,"
         "LIMS=PUSH_%u_%u_BRAKE_%u_%u\r\n",
         (unsigned int)BALL_TARGET_CX_A,
         (unsigned int)BALL_TARGET_CX_B,
@@ -138,7 +140,7 @@ bool Test_BallBalance_Init(void)
         (double)BALL_PUSH_KP,
         (double)BALL_BRAKE_GAIN,
         (unsigned int)BALL_BRAKE_BASE_US,
-        (unsigned int)BALL_BRAKE_MAX_US,
+        (double)BALL_BRAKE_SPEED_FACTOR,
         (unsigned int)SERVO_PUSH_MIN_US,
         (unsigned int)SERVO_PUSH_MAX_US,
         (unsigned int)SERVO_BRAKE_MIN_US,
@@ -210,7 +212,8 @@ void Test_BallBalance_Update(void)
         if (det.has_target)
         {
             s_last_cx    = (int32_t)det.cx;
-            s_last_error = s_last_cx - (int32_t)s_target_cx;
+            /* cx < target → ball left → error>0 → pulse increase → ball right */
+            s_last_error = (int32_t)s_target_cx - s_last_cx;
             s_has_target = true;
             s_lost_frames = 0U;
 
@@ -238,13 +241,13 @@ void Test_BallBalance_Update(void)
 
                 /*
                  * Is ball moving toward target?
-                 * error=cx-700: error>0=ball right, error<0=ball left
-                 * Ball right (error>0) + moving left (speed<0) → toward
-                 * Ball left (error<0) + moving right (speed>0) → toward
+                 * error=target-cx: error>0=ball left, error<0=ball right
+                 * Ball left (error>0) + moving right (speed>0) → toward
+                 * Ball right (error<0) + moving left (speed<0) → toward
                  */
                 moving_to_target =
-                    (s_last_error > 0 && s_speed < 0) ||
-                    (s_last_error < 0 && s_speed > 0);
+                    (s_last_error > 0 && s_speed > 0) ||
+                    (s_last_error < 0 && s_speed < 0);
 
                 if (moving_to_target)
                 {
@@ -257,11 +260,6 @@ void Test_BallBalance_Update(void)
                         /* BRAKING: reverse tilt to slow ball down */
                         int32_t brake = (int32_t)BALL_BRAKE_BASE_US +
                             (int32_t)((float)abs(s_speed) * BALL_BRAKE_SPEED_FACTOR);
-
-                        if (brake > (int32_t)BALL_BRAKE_MAX_US)
-                        {
-                            brake = (int32_t)BALL_BRAKE_MAX_US;
-                        }
 
                         /*
                          * Ball moving right (speed>0): brake by tilting LEFT
@@ -292,22 +290,33 @@ void Test_BallBalance_Update(void)
                     s_braking = false;
                 }
 
-                /* Stuck detection: ball not moving, ramp up push */
-                if (abs(s_speed) < BALL_STUCK_SPEED_PX && !s_braking)
+                /* Stuck detection: wait N frames, then boost for HOLD frames */
+                if (s_stuck_hold_frames > 0U)
                 {
-                    s_stuck_boost += BALL_STUCK_BOOST_US;
+                    /* Currently in boost hold phase */
+                    s_stuck_hold_frames--;
                     if (delta > 0)
-                    {
-                        delta += (int32_t)s_stuck_boost;
-                    }
+                        delta += (int32_t)BALL_STUCK_BOOST_US;
                     else
+                        delta -= (int32_t)BALL_STUCK_BOOST_US;
+                }
+                else if (abs(s_speed) < BALL_STUCK_SPEED_PX && !s_braking)
+                {
+                    s_stuck_counter++;
+                    if (s_stuck_counter >= BALL_STUCK_WAIT)
                     {
-                        delta -= (int32_t)s_stuck_boost;
+                        s_stuck_counter      = 0U;
+                        s_stuck_hold_frames  = BALL_STUCK_HOLD;
+                        if (delta > 0)
+                            delta += (int32_t)BALL_STUCK_BOOST_US;
+                        else
+                            delta -= (int32_t)BALL_STUCK_BOOST_US;
                     }
                 }
                 else
                 {
-                    s_stuck_boost = 0U;
+                    s_stuck_counter      = 0U;
+                    s_stuck_hold_frames  = 0U;
                 }
 
                 /* Minimum step */
@@ -351,7 +360,8 @@ void Test_BallBalance_Update(void)
         {
             /* Hold time elapsed, switch target */
             s_cycle_start_ms = 0U;
-            s_stuck_boost    = 0U;
+            s_stuck_counter     = 0U;
+            s_stuck_hold_frames = 0U;
 
             if (s_target_cx == BALL_TARGET_CX_A)
             {
