@@ -39,6 +39,9 @@
 #elif PROJECT_TEST_MODE == TEST_MODE_OLED_KEY
 #include "test_oled_key.h"
 
+#elif PROJECT_TEST_MODE == TEST_MODE_OLED_FULLSCREEN_TIMER
+#include "test_oled_fullscreen_timer.h"
+
 #elif PROJECT_TEST_MODE == TEST_MODE_BALL_BALANCE
 #include "test_ball_balance.h"
 
@@ -84,6 +87,9 @@ bool TestRunner_Init(void)
 
 #elif PROJECT_TEST_MODE == TEST_MODE_OLED_KEY
     return Test_OledKey_Init();
+
+#elif PROJECT_TEST_MODE == TEST_MODE_OLED_FULLSCREEN_TIMER
+    return Test_OledFullscreenTimer_Init();
 
 #elif PROJECT_TEST_MODE == TEST_MODE_BALL_BALANCE
     return Test_BallBalance_Init();
@@ -132,6 +138,9 @@ void TestRunner_Update(void)
 #elif PROJECT_TEST_MODE == TEST_MODE_OLED_KEY
     Test_OledKey_Update();
 
+#elif PROJECT_TEST_MODE == TEST_MODE_OLED_FULLSCREEN_TIMER
+    Test_OledFullscreenTimer_Update();
+
 #elif PROJECT_TEST_MODE == TEST_MODE_BALL_BALANCE
     Test_BallBalance_Update();
 #endif
@@ -175,6 +184,9 @@ void TestRunner_Stop(void)
 
 #elif PROJECT_TEST_MODE == TEST_MODE_OLED_KEY
     Test_OledKey_Stop();
+
+#elif PROJECT_TEST_MODE == TEST_MODE_OLED_FULLSCREEN_TIMER
+    Test_OledFullscreenTimer_Stop();
 
 #elif PROJECT_TEST_MODE == TEST_MODE_BALL_BALANCE
     Test_BallBalance_Stop();

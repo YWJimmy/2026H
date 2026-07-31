@@ -518,6 +518,11 @@
               <FileType>1</FileType>
               <FilePath>..\User\test\test_oled_key.c</FilePath>
             </File>
+            <File>
+              <FileName>test_oled_fullscreen_timer.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\test\test_oled_fullscreen_timer.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -793,6 +798,11 @@
               <FileName>chassis_speed_profile.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\module\chassis_speed_profile.c</FilePath>
+            </File>
+            <File>
+              <FileName>oled_fullscreen_timer.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\module\oled_fullscreen_timer.c</FilePath>
             </File>
           </Files>
         </Group>

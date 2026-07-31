@@ -124,6 +124,16 @@ void BSP_Oled_DrawU32(
     uint32_t value);
 
 /**
+ * @brief Fill or clear a clipped pixel rectangle in the framebuffer.
+ */
+void BSP_Oled_FillRect(
+    uint8_t x,
+    uint8_t y,
+    uint8_t width,
+    uint8_t height,
+    bool on);
+
+/**
  * @brief 将指定页面重新标记为待刷新。
  */
 void BSP_Oled_MarkPagesDirty(

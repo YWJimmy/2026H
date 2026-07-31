@@ -15,6 +15,7 @@
 #define TEST_MODE_LINE_FOLLOW_DRIVE         11U
 #define TEST_MODE_CHASSIS_RAMP              12U
 #define TEST_MODE_OLED_KEY                  13U
+#define TEST_MODE_OLED_FULLSCREEN_TIMER     14U
 
 #define TEST_MODE_BALL_BALANCE              20U
 

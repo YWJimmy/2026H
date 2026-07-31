@@ -809,6 +809,72 @@ void BSP_Oled_DrawI32(
     BSP_Oled_DrawU32(x, page, magnitude);
 }
 
+void BSP_Oled_FillRect(
+    uint8_t x,
+    uint8_t y,
+    uint8_t width,
+    uint8_t height,
+    bool on)
+{
+    uint16_t x_end;
+    uint16_t y_end;
+    uint8_t first_page;
+    uint8_t last_page;
+    uint8_t page;
+
+    if ((width == 0U) || (height == 0U) ||
+        (x >= BSP_OLED_WIDTH) ||
+        (y >= BSP_OLED_HEIGHT))
+    {
+        return;
+    }
+
+    x_end = (uint16_t)x + (uint16_t)width;
+    y_end = (uint16_t)y + (uint16_t)height;
+    if (x_end > BSP_OLED_WIDTH)
+    {
+        x_end = BSP_OLED_WIDTH;
+    }
+    if (y_end > BSP_OLED_HEIGHT)
+    {
+        y_end = BSP_OLED_HEIGHT;
+    }
+
+    first_page = (uint8_t)(y / 8U);
+    last_page = (uint8_t)((y_end - 1U) / 8U);
+
+    for (page = first_page; page <= last_page; page++)
+    {
+        uint8_t page_top = (uint8_t)(page * 8U);
+        uint8_t top = (y > page_top) ? y : page_top;
+        uint8_t page_bottom = (uint8_t)(page_top + 8U);
+        uint8_t bottom =
+            (y_end < page_bottom) ?
+                (uint8_t)y_end : page_bottom;
+        uint8_t top_bit = (uint8_t)(top - page_top);
+        uint8_t bottom_bit =
+            (uint8_t)(bottom - page_top);
+        uint8_t mask = (uint8_t)(
+            (((uint16_t)1U << bottom_bit) - 1U) &
+            ~(((uint16_t)1U << top_bit) - 1U));
+        uint16_t column;
+
+        for (column = x; column < x_end; column++)
+        {
+            if (on)
+            {
+                s_framebuffer[page][column] |= mask;
+            }
+            else
+            {
+                s_framebuffer[page][column] &=
+                    (uint8_t)(~mask);
+            }
+        }
+        Oled_MarkPageDirty(page);
+    }
+}
+
 void BSP_Oled_MarkPagesDirty(
     uint8_t first_page,
     uint8_t page_count)
