@@ -51,7 +51,7 @@ static bool Test_LineFollowDrive_KeyPressed(uint32_t now_ms)
     {
         s_key.stable_state = raw;
 
-        if (s_key.stable_state == GPIO_PIN_RESET)
+        if (s_key.stable_state == GPIO_PIN_SET)
         {
             return true;
         }
@@ -93,15 +93,13 @@ static void Test_LineFollowDrive_PrintStatus(void)
         return;
     }
 
-    /*
-     * 两条短日志，避免USART1单条消息超过内部160字节限制。
-     */
     (void)BSP_Debug_Printf(
         "LFD,R=%u,M=%s,X=%s,LS=%s,MASK=0x%02X,"
         "E=%d,DE=%d,B=%ld,C=%ld,T=%ld/%ld,AGE=%lu\r\n",
         control.running ? 1U : 0U,
         LineFollowControl_ModeName(control.mode),
-        LineFollowControl_StopReasonName(control.stop_reason),
+        LineFollowControl_StopReasonName(
+            control.stop_reason),
         LineFollow_StateName(control.line_state),
         (unsigned int)control.black_mask,
         (int)control.error,
@@ -115,9 +113,11 @@ static void Test_LineFollowDrive_PrintStatus(void)
     if (Chassis_GetStatus(&chassis))
     {
         (void)BSP_Debug_Printf(
-            "LFC,S=%lu,TM=%ld/%ld,MM=%ld/%ld,"
-            "PWM=%d/%d,D=%d/%d,V=%u,OVR=%lu\r\n",
+            "LFC,S=%lu,CMD=%ld/%ld,RMP=%ld/%ld,MEA=%ld/%ld,"
+            "PWM=%d/%d,D=%d/%d,A=%u,V=%u,OVR=%lu\r\n",
             (unsigned long)chassis.control_sequence,
+            (long)chassis.left_command_mm_s,
+            (long)chassis.right_command_mm_s,
             (long)chassis.left_target_mm_s,
             (long)chassis.right_target_mm_s,
             (long)chassis.left_measured_mm_s,
@@ -126,6 +126,7 @@ static void Test_LineFollowDrive_PrintStatus(void)
             (int)chassis.right_pwm,
             (int)chassis.left_delta,
             (int)chassis.right_delta,
+            chassis.speed_ramp_active ? 1U : 0U,
             chassis.encoder_sample_valid ? 1U : 0U,
             (unsigned long)chassis.timing_overrun_count);
     }
@@ -134,6 +135,7 @@ static void Test_LineFollowDrive_PrintStatus(void)
 bool Test_LineFollowDrive_Init(void)
 {
     s_initialized = false;
+
     if (!BSP_DebugUart_Init())
     {
         return false;
@@ -171,13 +173,14 @@ bool Test_LineFollowDrive_Init(void)
 
     (void)BSP_Debug_Printf(
         "TEST,LINE_FOLLOW_DRIVE,READY,BACKEND=%s,"
-        "KEY=KEY0_PE4_ACTIVE_LOW,DEBOUNCE_MS=%lu\r\n",
+        "KEY=KEY0_PE4_ACTIVE_HIGH,DEBOUNCE_MS=%lu\r\n",
         LineSensor_GetBackendName(),
         (unsigned long)LINE_FOLLOW_DRIVE_KEY_DEBOUNCE_MS);
 
     (void)BSP_Debug_Printf(
-        "LFD,CFG=BASE_250_TO_120,MAX=300,"
-        "KP_Q10=%ld,KD_Q10=%ld,LOST=%lu,BLACK=%lu,REVERSE=0\r\n",
+        "LFD,CFG=BASE_360_TO_120,MAX=500,"
+        "KP_Q10=%ld,KD_Q10=%ld,LOST=%lu,BLACK=%lu,"
+        "REVERSE=0,RAMP=1\r\n",
         (long)LINE_FOLLOW_CONTROL_KP_Q10,
         (long)LINE_FOLLOW_CONTROL_KD_Q10,
         (unsigned long)LINE_FOLLOW_CONTROL_LOST_TIMEOUT_MS,
@@ -237,6 +240,7 @@ void Test_LineFollowDrive_Stop(void)
     (void)LineSensor_Stop();
 
     s_initialized = false;
+
     (void)BSP_Debug_Printf(
         "TEST,LINE_FOLLOW_DRIVE,STOP\r\n");
 }

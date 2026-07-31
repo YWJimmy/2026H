@@ -15,7 +15,6 @@ static bool s_has_normal_direction = false;
 
 static int16_t s_previous_normal_error = 0;
 static int8_t s_last_search_direction = 0;
-
 static uint32_t s_state_start_ms = 0U;
 
 static LineFollowControlStatus_t s_status;
@@ -61,14 +60,16 @@ static int32_t LineFollowControl_Q10Multiply(
 
     if (product >= 0)
     {
-        product += (int64_t)(1L << (LINE_FOLLOW_CONTROL_Q_SHIFT - 1));
+        product +=
+            (int64_t)(1L << (LINE_FOLLOW_CONTROL_Q_SHIFT - 1));
     }
     else
     {
-        product -= (int64_t)(1L << (LINE_FOLLOW_CONTROL_Q_SHIFT - 1));
+        product -=
+            (int64_t)(1L << (LINE_FOLLOW_CONTROL_Q_SHIFT - 1));
     }
 
-    product /= (int64_t)(1L << LINE_FOLLOW_CONTROL_Q_SHIFT);
+    product >>= LINE_FOLLOW_CONTROL_Q_SHIFT;
 
     if (product > INT32_MAX)
     {
@@ -85,10 +86,13 @@ static int32_t LineFollowControl_Q10Multiply(
 
 static int32_t LineFollowControl_GetBaseSpeed(int16_t error)
 {
-    int32_t error_abs = LineFollowControl_AbsI32((int32_t)error);
+    int32_t error_abs =
+        LineFollowControl_AbsI32((int32_t)error);
+
     int32_t speed_span =
         LINE_FOLLOW_CONTROL_CENTER_SPEED_MM_S -
         LINE_FOLLOW_CONTROL_MIN_BASE_SPEED_MM_S;
+
     int32_t reduction;
 
     error_abs = LineFollowControl_ClampI32(
@@ -108,7 +112,7 @@ static bool LineFollowControl_SetWheelTargets(
     int32_t right_mm_s)
 {
     /*
-     * 用户明确要求巡线时不允许反向。
+     * 巡线明确禁止反向。
      * 即使PD或搜索参数异常，也在这里做最终非负限幅。
      */
     left_mm_s = LineFollowControl_ClampI32(
@@ -172,7 +176,8 @@ static bool LineFollowControl_HandleNormal(
         LINE_FOLLOW_CONTROL_MODE_NORMAL,
         now_ms);
 
-    base_speed = LineFollowControl_GetBaseSpeed(result->error);
+    base_speed =
+        LineFollowControl_GetBaseSpeed(result->error);
 
     if (s_has_previous_normal_error)
     {
@@ -222,12 +227,15 @@ static bool LineFollowControl_HandleNormal(
 
     s_status.base_speed_mm_s = base_speed;
     s_status.correction_mm_s = correction;
-    s_status.error_delta = (int16_t)LineFollowControl_ClampI32(
-        error_delta,
-        INT16_MIN,
-        INT16_MAX);
-    s_status.last_search_direction = s_last_search_direction;
-    s_status.has_normal_direction = s_has_normal_direction;
+    s_status.error_delta =
+        (int16_t)LineFollowControl_ClampI32(
+            error_delta,
+            INT16_MIN,
+            INT16_MAX);
+    s_status.last_search_direction =
+        s_last_search_direction;
+    s_status.has_normal_direction =
+        s_has_normal_direction;
 
     return LineFollowControl_SetWheelTargets(
         left_target,
@@ -236,23 +244,22 @@ static bool LineFollowControl_HandleNormal(
 
 static bool LineFollowControl_HandleLost(uint32_t now_ms)
 {
-    uint32_t elapsed_ms;
-
     LineFollowControl_EnterMode(
         LINE_FOLLOW_CONTROL_MODE_LOST_SEARCH,
         now_ms);
 
-    elapsed_ms = s_status.state_elapsed_ms;
     LineFollowControl_ResetPd();
 
-    if (!s_has_normal_direction || (s_last_search_direction == 0))
+    if (!s_has_normal_direction ||
+        (s_last_search_direction == 0))
     {
         LineFollowControl_Stop(
             LINE_FOLLOW_CONTROL_STOP_LOST_NO_DIRECTION);
         return false;
     }
 
-    if (elapsed_ms > LINE_FOLLOW_CONTROL_LOST_TIMEOUT_MS)
+    if (s_status.state_elapsed_ms >
+        LINE_FOLLOW_CONTROL_LOST_TIMEOUT_MS)
     {
         LineFollowControl_Stop(
             LINE_FOLLOW_CONTROL_STOP_LOST_TIMEOUT);
@@ -261,17 +268,16 @@ static bool LineFollowControl_HandleLost(uint32_t now_ms)
 
     s_status.base_speed_mm_s =
         LINE_FOLLOW_CONTROL_LOST_SEARCH_SPEED_MM_S;
-    s_status.last_search_direction = s_last_search_direction;
+    s_status.last_search_direction =
+        s_last_search_direction;
 
     if (s_last_search_direction > 0)
     {
-        /* 最后看到线在右侧：左轮为外侧轮。 */
         return LineFollowControl_SetWheelTargets(
             LINE_FOLLOW_CONTROL_LOST_SEARCH_SPEED_MM_S,
             0);
     }
 
-    /* 最后看到线在左侧：右轮为外侧轮。 */
     return LineFollowControl_SetWheelTargets(
         0,
         LINE_FOLLOW_CONTROL_LOST_SEARCH_SPEED_MM_S);
@@ -351,22 +357,16 @@ bool LineFollowControl_Start(void)
     s_previous_normal_error = 0;
     s_last_search_direction = 0;
 
+    memset(&s_status, 0, sizeof(s_status));
+    s_status.initialized = true;
     s_status.running = true;
     s_status.chassis_enabled = true;
-    s_status.mode = LINE_FOLLOW_CONTROL_MODE_WAITING_LINE;
-    s_status.stop_reason = LINE_FOLLOW_CONTROL_STOP_NONE;
-    s_status.line_state = LINE_FOLLOW_STATE_INVALID;
-    s_status.black_mask = 0U;
-    s_status.error = 0;
-    s_status.error_delta = 0;
-    s_status.base_speed_mm_s = 0;
-    s_status.correction_mm_s = 0;
-    s_status.left_target_mm_s = 0;
-    s_status.right_target_mm_s = 0;
-    s_status.last_search_direction = 0;
-    s_status.has_normal_direction = false;
-    s_status.line_sequence = 0U;
-    s_status.state_elapsed_ms = 0U;
+    s_status.mode =
+        LINE_FOLLOW_CONTROL_MODE_WAITING_LINE;
+    s_status.stop_reason =
+        LINE_FOLLOW_CONTROL_STOP_NONE;
+    s_status.line_state =
+        LINE_FOLLOW_STATE_INVALID;
     s_status.timestamp_ms = now_ms;
 
     s_state_start_ms = now_ms;
@@ -390,7 +390,8 @@ void LineFollowControl_Stop(LineFollowControlStopReason_t reason)
 
     s_running = false;
     s_status.running = false;
-    s_status.mode = LINE_FOLLOW_CONTROL_MODE_STOPPED;
+    s_status.mode =
+        LINE_FOLLOW_CONTROL_MODE_STOPPED;
     s_status.stop_reason = reason;
     s_status.base_speed_mm_s = 0;
     s_status.correction_mm_s = 0;
@@ -400,10 +401,7 @@ void LineFollowControl_Stop(LineFollowControlStopReason_t reason)
 
     LineFollowControl_ResetPd();
 
-    /*
-     * Chassis_Stop()清目标、清PI并立即短路刹车。
-     * 保持底盘enabled，使刹车状态持续；下一次Start()会重新复位。
-     */
+    /* 故障与人工停止均绕过斜坡，立即短路刹车。 */
     Chassis_Stop();
     s_status.chassis_enabled = Chassis_IsEnabled();
 }
@@ -415,14 +413,17 @@ void LineFollowControl_Shutdown(void)
         return;
     }
 
-    LineFollowControl_Stop(LINE_FOLLOW_CONTROL_STOP_USER);
+    LineFollowControl_Stop(
+        LINE_FOLLOW_CONTROL_STOP_USER);
+
     (void)Chassis_Enable(false);
 
     s_status.chassis_enabled = false;
     s_status.mode = LINE_FOLLOW_CONTROL_MODE_IDLE;
 }
 
-bool LineFollowControl_Submit(const LineFollowResult_t *result)
+bool LineFollowControl_Submit(
+    const LineFollowResult_t *result)
 {
     uint32_t now_ms;
 
@@ -447,13 +448,16 @@ bool LineFollowControl_Submit(const LineFollowResult_t *result)
     switch (result->state)
     {
         case LINE_FOLLOW_STATE_NORMAL:
-            return LineFollowControl_HandleNormal(result, now_ms);
+            return LineFollowControl_HandleNormal(
+                result,
+                now_ms);
 
         case LINE_FOLLOW_STATE_LOST:
             return LineFollowControl_HandleLost(now_ms);
 
         case LINE_FOLLOW_STATE_ALL_BLACK:
-            return LineFollowControl_HandleAllBlack(now_ms);
+            return LineFollowControl_HandleAllBlack(
+                now_ms);
 
         case LINE_FOLLOW_STATE_INVALID:
         default:
@@ -475,10 +479,13 @@ void LineFollowControl_Process(void)
         (void)Chassis_Update();
     }
 
-    s_status.chassis_enabled = Chassis_IsEnabled();
+    s_status.chassis_enabled =
+        Chassis_IsEnabled();
 
-    if ((s_status.mode == LINE_FOLLOW_CONTROL_MODE_LOST_SEARCH) ||
-        (s_status.mode == LINE_FOLLOW_CONTROL_MODE_ALL_BLACK_PASS))
+    if ((s_status.mode ==
+         LINE_FOLLOW_CONTROL_MODE_LOST_SEARCH) ||
+        (s_status.mode ==
+         LINE_FOLLOW_CONTROL_MODE_ALL_BLACK_PASS))
     {
         s_status.state_elapsed_ms =
             (uint32_t)(HAL_GetTick() - s_state_start_ms);
@@ -495,7 +502,8 @@ bool LineFollowControl_IsRunning(void)
     return s_initialized && s_running;
 }
 
-bool LineFollowControl_GetStatus(LineFollowControlStatus_t *status)
+bool LineFollowControl_GetStatus(
+    LineFollowControlStatus_t *status)
 {
     if ((!s_initialized) || (status == NULL))
     {
@@ -506,7 +514,8 @@ bool LineFollowControl_GetStatus(LineFollowControlStatus_t *status)
     return true;
 }
 
-const char *LineFollowControl_ModeName(LineFollowControlMode_t mode)
+const char *LineFollowControl_ModeName(
+    LineFollowControlMode_t mode)
 {
     switch (mode)
     {

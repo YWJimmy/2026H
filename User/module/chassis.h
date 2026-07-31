@@ -15,14 +15,22 @@ typedef struct
     bool encoder_sample_valid;
     bool left_output_saturated;
     bool right_output_saturated;
+    bool speed_ramp_active;
 
+    /* 上层给出的最终目标。 */
+    int32_t left_command_mm_s;
+    int32_t right_command_mm_s;
+    int32_t left_command_cps;
+    int32_t right_command_cps;
+
+    /* 编码器前馈+PI当前跟踪的中间目标。 */
     int32_t left_target_mm_s;
     int32_t right_target_mm_s;
-    int32_t left_measured_mm_s;
-    int32_t right_measured_mm_s;
-
     int32_t left_target_cps;
     int32_t right_target_cps;
+
+    int32_t left_measured_mm_s;
+    int32_t right_measured_mm_s;
     int32_t left_raw_measured_cps;
     int32_t right_raw_measured_cps;
     int32_t left_measured_cps;
@@ -62,7 +70,7 @@ bool Chassis_Init(void);
 /**
  * @brief 使能或关闭底盘。
  *
- * 使能时重置编码器基准和控制器状态；
+ * 使能时重置编码器基准、速度斜坡和控制器状态；
  * 关闭时立即短路刹车并拉低TB6612 STBY。
  */
 bool Chassis_Enable(bool enable);
@@ -70,24 +78,25 @@ bool Chassis_Enable(bool enable);
 bool Chassis_IsInitialized(void);
 bool Chassis_IsEnabled(void);
 
-/**
- * @brief 将mm/s转换为编码器count/s，不使用浮点数。
- */
+/** 将mm/s转换为编码器count/s，不使用浮点数。 */
 int32_t Chassis_MmpsToCps(int32_t speed_mm_s);
 
-/**
- * @brief 将编码器count/s转换为mm/s，不使用浮点数。
- */
+/** 将编码器count/s转换为mm/s，不使用浮点数。 */
 int32_t Chassis_CpsToMmps(int32_t speed_cps);
 
 /**
- * @brief 直接设置左右轮目标速度，单位mm/s。
+ * @brief 设置左右轮最终目标速度，单位mm/s。
+ *
+ * 目标不会直接送入PI；Chassis_Update()会按配置斜率生成
+ * 中间目标，再由编码器前馈+PI跟踪。
  */
 bool Chassis_SetWheelSpeedMmps(int32_t left_mm_s,
                                int32_t right_mm_s);
 
 /**
- * @brief 直接设置左右轮目标速度，单位count/s。
+ * @brief 设置左右轮最终目标速度，单位count/s。
+ *
+ * 该接口同样经过速度斜坡。
  */
 bool Chassis_SetWheelSpeedCps(int32_t left_cps,
                               int32_t right_cps);
@@ -101,19 +110,13 @@ bool Chassis_SetWheelSpeedCps(int32_t left_cps,
 bool Chassis_SetVelocity(int32_t linear_mm_s,
                          int32_t angular_mrad_s);
 
-/**
- * @brief 运行时更新左右轮Q10 PI参数。
- *
- * 更新后左右积分和PWM输出清零。
- */
+/** 运行时更新左右轮Q10 PI参数。 */
 bool Chassis_SetWheelPiGainsQ10(int32_t left_kp_q10,
                                 int32_t left_ki_q10,
                                 int32_t right_kp_q10,
                                 int32_t right_ki_q10);
 
-/**
- * @brief 运行时更新左右轮前馈参数。
- */
+/** 运行时更新左右轮前馈参数。 */
 bool Chassis_SetWheelFeedforwardQ10(
     int32_t left_gain_q10,
     int16_t left_static_pwm,
@@ -121,7 +124,10 @@ bool Chassis_SetWheelFeedforwardQ10(
     int16_t right_static_pwm);
 
 /**
- * @brief 目标清零、清控制器并立即短路刹车。
+ * @brief 安全急停。
+ *
+ * 最终目标、中间目标、PI和PWM立即清零并短路刹车，
+ * 不经过正常减速斜坡。
  */
 void Chassis_Stop(void);
 
@@ -131,13 +137,11 @@ void Chassis_Stop(void);
  * 主循环中持续调用，标称每5 ms执行一次控制。
  *
  * @return true 本次执行了一个有效控制周期。
- * @return false 尚未到周期、未使能、严重超时或编码器样本被拒绝。
+ * @return false 尚未到周期、未使能、严重超时或样本被拒绝。
  */
 bool Chassis_Update(void);
 
-/**
- * @brief 获取最近一次底盘状态快照。
- */
+/** 获取最近一次底盘状态快照。 */
 bool Chassis_GetStatus(ChassisStatus_t *status);
 
 #ifdef __cplusplus

@@ -58,46 +58,11 @@ typedef struct
     uint32_t timestamp_ms;
 } LineFollowControlStatus_t;
 
-/**
- * @brief 初始化底盘和巡线外环。
- *
- * 初始化后底盘保持禁用，不会运动。
- */
 bool LineFollowControl_Init(void);
-
-/**
- * @brief 开始一次巡线运行。
- *
- * 会重置PD历史、丢线方向和状态计时，并使能底盘。
- * 开始后在收到第一帧有效巡线结果前保持零速。
- */
 bool LineFollowControl_Start(void);
-
-/**
- * @brief 以指定原因停止本次巡线。
- *
- * 停止后目标清零并保持短路刹车；不会立即拉低TB6612 STBY。
- * 再次调用Start()可重新开始。
- */
 void LineFollowControl_Stop(LineFollowControlStopReason_t reason);
-
-/**
- * @brief 测试结束时彻底关闭底盘。
- *
- * 先短路刹车，再关闭TB6612 STBY。
- */
 void LineFollowControl_Shutdown(void);
-
-/**
- * @brief 提交一帧新的巡线分析结果。
- *
- * 仅在运行状态下产生运动命令；停止状态下只保存诊断信息。
- */
 bool LineFollowControl_Submit(const LineFollowResult_t *result);
-
-/**
- * @brief 主循环持续调用，使现有底盘5 ms闭环继续运行。
- */
 void LineFollowControl_Process(void);
 
 bool LineFollowControl_IsInitialized(void);

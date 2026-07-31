@@ -19,6 +19,12 @@ static WheelSpeedController_t s_right_controller;
 static ChassisStatus_t s_status;
 static uint32_t s_last_control_ms = 0U;
 
+/* 最终命令与中间斜坡状态均使用count/s保存。 */
+static int32_t s_left_command_cps = 0;
+static int32_t s_right_command_cps = 0;
+static int32_t s_forward_ramped_cps = 0;
+static int32_t s_turn_ramped_cps = 0;
+
 static int32_t Chassis_DivideRounded(int64_t numerator,
                                      int64_t denominator)
 {
@@ -67,6 +73,31 @@ static int32_t Chassis_ClampCps(int64_t speed_cps)
     return (int32_t)speed_cps;
 }
 
+
+static int32_t Chassis_KeepCommandDirection(
+    int32_t ramped_cps,
+    int32_t command_cps)
+{
+    /*
+     * 当最终命令明确为正/负时，中间目标不得短暂越过零点。
+     * 这可避免转向斜坡快于前进斜坡时，非负巡线命令
+     * 临时产生反向轮速。
+     *
+     * command=0时不强行钳位，允许当前速度按减速斜坡回零。
+     */
+    if ((command_cps > 0) && (ramped_cps < 0))
+    {
+        return 0;
+    }
+
+    if ((command_cps < 0) && (ramped_cps > 0))
+    {
+        return 0;
+    }
+
+    return ramped_cps;
+}
+
 static int32_t Chassis_AddSaturated(int32_t total, int16_t delta)
 {
     int64_t result = (int64_t)total + (int64_t)delta;
@@ -84,6 +115,21 @@ static int32_t Chassis_AddSaturated(int32_t total, int16_t delta)
     return (int32_t)result;
 }
 
+static int32_t Chassis_AbsI32(int32_t value)
+{
+    if (value >= 0)
+    {
+        return value;
+    }
+
+    if (value == INT32_MIN)
+    {
+        return INT32_MAX;
+    }
+
+    return -value;
+}
+
 static int32_t Chassis_AbsDelta(int16_t delta)
 {
     return (delta < 0) ? -(int32_t)delta : (int32_t)delta;
@@ -93,10 +139,6 @@ static int32_t Chassis_GetAllowedEncoderDelta(uint16_t dt_ms)
 {
     int64_t scaled_delta;
 
-    /*
-     * 向上取整：
-     * ceil(max_cps × dt_ms / 1000) + margin。
-     */
     scaled_delta =
         ((int64_t)CHASSIS_ENCODER_PLAUSIBLE_MAX_CPS *
          (int64_t)dt_ms +
@@ -130,10 +172,6 @@ static void Chassis_ClearControlStatus(void)
 
 int32_t Chassis_MmpsToCps(int32_t speed_mm_s)
 {
-    /*
-     * mm/s × 1000 = um/s
-     * cps = um/s × counts/rev ÷ circumference_um
-     */
     return Chassis_DivideRounded(
         (int64_t)speed_mm_s *
         (int64_t)BSP_ENCODER_COUNTS_PER_REV *
@@ -143,9 +181,6 @@ int32_t Chassis_MmpsToCps(int32_t speed_mm_s)
 
 int32_t Chassis_CpsToMmps(int32_t speed_cps)
 {
-    /*
-     * mm/s = cps × circumference_um ÷ counts/rev ÷ 1000
-     */
     return Chassis_DivideRounded(
         (int64_t)speed_cps *
         (int64_t)CHASSIS_WHEEL_CIRCUMFERENCE_UM,
@@ -153,18 +188,196 @@ int32_t Chassis_CpsToMmps(int32_t speed_cps)
         1000LL);
 }
 
-static void Chassis_ResetControllers(void)
+static int32_t Chassis_ApproachRate(
+    int32_t current,
+    int32_t target,
+    int32_t rate_cps_per_s,
+    uint16_t dt_ms)
 {
-    WheelSpeedControl_Reset(&s_left_controller);
-    WheelSpeedControl_Reset(&s_right_controller);
+    int64_t scaled_step;
+    int32_t maximum_step;
+    int32_t difference;
 
-    (void)WheelSpeedControl_SetTargetCps(
-        &s_left_controller,
-        s_status.left_target_cps);
+    if (rate_cps_per_s <= 0)
+    {
+        return target;
+    }
 
-    (void)WheelSpeedControl_SetTargetCps(
-        &s_right_controller,
-        s_status.right_target_cps);
+    /* 向上取整，避免5 ms周期下因整数截断停滞。 */
+    scaled_step =
+        (int64_t)rate_cps_per_s * (int64_t)dt_ms;
+
+    maximum_step =
+        (int32_t)((scaled_step + 999LL) / 1000LL);
+
+    if (maximum_step < 1)
+    {
+        maximum_step = 1;
+    }
+
+    difference = target - current;
+
+    if (difference > maximum_step)
+    {
+        return current + maximum_step;
+    }
+
+    if (difference < -maximum_step)
+    {
+        return current - maximum_step;
+    }
+
+    return target;
+}
+
+static int32_t Chassis_SelectForwardRateCps(
+    int32_t current_cps,
+    int32_t target_cps)
+{
+    bool same_direction;
+    bool increasing_magnitude;
+
+    if ((current_cps == 0) && (target_cps != 0))
+    {
+        return Chassis_MmpsToCps(
+            CHASSIS_RAMP_FORWARD_ACCEL_MM_S2);
+    }
+
+    if (target_cps == 0)
+    {
+        return Chassis_MmpsToCps(
+            CHASSIS_RAMP_FORWARD_DECEL_MM_S2);
+    }
+
+    same_direction =
+        ((current_cps >= 0) && (target_cps >= 0)) ||
+        ((current_cps <= 0) && (target_cps <= 0));
+
+    if (!same_direction)
+    {
+        /* 换向先按减速斜率穿过0。 */
+        return Chassis_MmpsToCps(
+            CHASSIS_RAMP_FORWARD_DECEL_MM_S2);
+    }
+
+    increasing_magnitude =
+        Chassis_AbsI32(target_cps) >
+        Chassis_AbsI32(current_cps);
+
+    return Chassis_MmpsToCps(
+        increasing_magnitude
+            ? CHASSIS_RAMP_FORWARD_ACCEL_MM_S2
+            : CHASSIS_RAMP_FORWARD_DECEL_MM_S2);
+}
+
+static void Chassis_ResetSpeedRamp(void)
+{
+    s_left_command_cps = 0;
+    s_right_command_cps = 0;
+    s_forward_ramped_cps = 0;
+    s_turn_ramped_cps = 0;
+
+    s_status.left_command_mm_s = 0;
+    s_status.right_command_mm_s = 0;
+    s_status.left_command_cps = 0;
+    s_status.right_command_cps = 0;
+
+    s_status.left_target_mm_s = 0;
+    s_status.right_target_mm_s = 0;
+    s_status.left_target_cps = 0;
+    s_status.right_target_cps = 0;
+    s_status.speed_ramp_active = false;
+}
+
+
+static bool Chassis_UpdateSpeedRamp(uint16_t dt_ms)
+{
+    int32_t command_forward_cps;
+    int32_t command_turn_cps;
+    int32_t forward_rate_cps_per_s;
+    int32_t turn_rate_cps_per_s;
+    int32_t left_ramped_cps;
+    int32_t right_ramped_cps;
+
+    command_forward_cps =
+        (s_left_command_cps + s_right_command_cps) / 2;
+
+    command_turn_cps =
+        (s_left_command_cps - s_right_command_cps) / 2;
+
+    forward_rate_cps_per_s =
+        Chassis_SelectForwardRateCps(
+            s_forward_ramped_cps,
+            command_forward_cps);
+
+    turn_rate_cps_per_s =
+        Chassis_MmpsToCps(
+            CHASSIS_RAMP_TURN_SLEW_MM_S2);
+
+    s_forward_ramped_cps = Chassis_ApproachRate(
+        s_forward_ramped_cps,
+        command_forward_cps,
+        forward_rate_cps_per_s,
+        dt_ms);
+
+    s_turn_ramped_cps = Chassis_ApproachRate(
+        s_turn_ramped_cps,
+        command_turn_cps,
+        turn_rate_cps_per_s,
+        dt_ms);
+
+    left_ramped_cps = Chassis_ClampCps(
+        (int64_t)s_forward_ramped_cps +
+        (int64_t)s_turn_ramped_cps);
+
+    right_ramped_cps = Chassis_ClampCps(
+        (int64_t)s_forward_ramped_cps -
+        (int64_t)s_turn_ramped_cps);
+
+    left_ramped_cps = Chassis_KeepCommandDirection(
+        left_ramped_cps,
+        s_left_command_cps);
+
+    right_ramped_cps = Chassis_KeepCommandDirection(
+        right_ramped_cps,
+        s_right_command_cps);
+
+    /*
+     * 两轮限幅后重新同步内部前进/转向状态，
+     * 防止内部状态长期超出可实现范围。
+     */
+    s_forward_ramped_cps =
+        (left_ramped_cps + right_ramped_cps) / 2;
+
+    s_turn_ramped_cps =
+        (left_ramped_cps - right_ramped_cps) / 2;
+
+    s_status.left_target_cps = left_ramped_cps;
+    s_status.right_target_cps = right_ramped_cps;
+    s_status.left_target_mm_s =
+        Chassis_CpsToMmps(left_ramped_cps);
+    s_status.right_target_mm_s =
+        Chassis_CpsToMmps(right_ramped_cps);
+
+    s_status.speed_ramp_active =
+        (left_ramped_cps != s_left_command_cps) ||
+        (right_ramped_cps != s_right_command_cps);
+
+    if (!WheelSpeedControl_SetTargetCps(
+            &s_left_controller,
+            left_ramped_cps))
+    {
+        return false;
+    }
+
+    if (!WheelSpeedControl_SetTargetCps(
+            &s_right_controller,
+            right_ramped_cps))
+    {
+        return false;
+    }
+
+    return true;
 }
 
 bool Chassis_Init(void)
@@ -175,6 +388,7 @@ bool Chassis_Init(void)
     s_initialized = false;
     s_enabled = false;
     memset(&s_status, 0, sizeof(s_status));
+    Chassis_ResetSpeedRamp();
 
     if (!BSP_Motor_Init())
     {
@@ -218,18 +432,21 @@ bool Chassis_Init(void)
     right_config.measurement_window =
         WHEEL_SPEED_MEASUREMENT_WINDOW;
 
-    if (!WheelSpeedControl_Init(&s_left_controller, &left_config))
+    if (!WheelSpeedControl_Init(
+            &s_left_controller,
+            &left_config))
     {
         return false;
     }
 
-    if (!WheelSpeedControl_Init(&s_right_controller, &right_config))
+    if (!WheelSpeedControl_Init(
+            &s_right_controller,
+            &right_config))
     {
         return false;
     }
 
     s_last_control_ms = HAL_GetTick();
-
     s_initialized = true;
     s_status.initialized = true;
 
@@ -246,10 +463,12 @@ bool Chassis_Enable(bool enable)
     if (enable)
     {
         BSP_Encoder_Reset();
+
         memset(&s_status, 0, sizeof(s_status));
         s_status.initialized = true;
         s_status.encoder_sample_valid = true;
 
+        Chassis_ResetSpeedRamp();
         WheelSpeedControl_Reset(&s_left_controller);
         WheelSpeedControl_Reset(&s_right_controller);
 
@@ -290,31 +509,22 @@ bool Chassis_SetWheelSpeedCps(int32_t left_cps,
         return false;
     }
 
-    s_status.left_target_cps =
+    s_left_command_cps =
         Chassis_ClampCps((int64_t)left_cps);
 
-    s_status.right_target_cps =
+    s_right_command_cps =
         Chassis_ClampCps((int64_t)right_cps);
 
-    s_status.left_target_mm_s =
-        Chassis_CpsToMmps(s_status.left_target_cps);
+    s_status.left_command_cps = s_left_command_cps;
+    s_status.right_command_cps = s_right_command_cps;
+    s_status.left_command_mm_s =
+        Chassis_CpsToMmps(s_left_command_cps);
+    s_status.right_command_mm_s =
+        Chassis_CpsToMmps(s_right_command_cps);
 
-    s_status.right_target_mm_s =
-        Chassis_CpsToMmps(s_status.right_target_cps);
-
-    if (!WheelSpeedControl_SetTargetCps(
-            &s_left_controller,
-            s_status.left_target_cps))
-    {
-        return false;
-    }
-
-    if (!WheelSpeedControl_SetTargetCps(
-            &s_right_controller,
-            s_status.right_target_cps))
-    {
-        return false;
-    }
+    s_status.speed_ramp_active =
+        (s_status.left_target_cps != s_left_command_cps) ||
+        (s_status.right_target_cps != s_right_command_cps);
 
     return true;
 }
@@ -353,10 +563,6 @@ bool Chassis_SetVelocity(int32_t linear_mm_s,
         return false;
     }
 
-    /*
-     * 单侧差速量 = omega(rad/s) × track(mm) / 2
-     * omega以mrad/s输入，因此除以2000。
-     */
     turning_mm_s =
         ((int64_t)angular_mrad_s *
          (int64_t)CHASSIS_TRACK_WIDTH_MM) /
@@ -439,11 +645,7 @@ void Chassis_Stop(void)
         return;
     }
 
-    s_status.left_target_mm_s = 0;
-    s_status.right_target_mm_s = 0;
-    s_status.left_target_cps = 0;
-    s_status.right_target_cps = 0;
-
+    Chassis_ResetSpeedRamp();
     Chassis_ClearControlStatus();
 
     WheelSpeedControl_Reset(&s_left_controller);
@@ -478,16 +680,9 @@ bool Chassis_Update(void)
 
     if (elapsed_ms > (uint32_t)CHASSIS_TIMING_OVERRUN_MS)
     {
-        /*
-         * 严重超时后先同步并丢弃这段累计增量，
-         * 避免把长时间累计值按单个控制周期处理。
-         */
         (void)BSP_Encoder_Sample(&encoder_sample);
 
-        Chassis_ResetControllers();
-        BSP_Motor_BrakeAll();
-        Chassis_ClearControlStatus();
-
+        Chassis_Stop();
         s_status.encoder_sample_valid = false;
         s_status.dt_ms = (uint16_t)elapsed_ms;
         s_status.timestamp_ms = now_ms;
@@ -529,31 +724,21 @@ bool Chassis_Update(void)
             s_status.right_encoder_reject_count++;
         }
 
-        /*
-         * BSP已经同步了硬件计数基准，因此本次异常不会在下一周期
-         * 被重复读取。底盘层拒绝将异常增量加入有效里程。
-         */
         s_status.left_delta = encoder_sample.left_delta;
         s_status.right_delta = encoder_sample.right_delta;
         s_status.encoder_sample_valid = false;
 
-        s_status.left_raw_measured_cps = 0;
-        s_status.right_raw_measured_cps = 0;
-        s_status.left_measured_cps = 0;
-        s_status.right_measured_cps = 0;
-        s_status.left_measured_mm_s = 0;
-        s_status.right_measured_mm_s = 0;
-        s_status.left_error_cps = s_status.left_target_cps;
-        s_status.right_error_cps = s_status.right_target_cps;
-
-        Chassis_ResetControllers();
-        BSP_Motor_BrakeAll();
-        Chassis_ClearControlStatus();
+        Chassis_Stop();
 
         s_status.dt_ms = (uint16_t)elapsed_ms;
         s_status.timestamp_ms = now_ms;
         s_status.control_sequence++;
+        return false;
+    }
 
+    if (!Chassis_UpdateSpeedRamp((uint16_t)elapsed_ms))
+    {
+        Chassis_Stop();
         return false;
     }
 
@@ -638,10 +823,6 @@ bool Chassis_Update(void)
     s_status.left_delta = encoder_sample.left_delta;
     s_status.right_delta = encoder_sample.right_delta;
 
-    /*
-     * 只累计已经通过合理性检查的增量。
-     * 避免外部接线故障导致底盘有效里程瞬间跳变。
-     */
     s_status.left_total = Chassis_AddSaturated(
         s_status.left_total,
         encoder_sample.left_delta);
