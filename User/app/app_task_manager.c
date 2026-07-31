@@ -91,6 +91,7 @@ bool AppTaskManager_Start(
 void AppTaskManager_Update(void)
 {
     uint32_t now_ms;
+    uint32_t task_elapsed_ms;
     AppTaskPortResult_t result;
 
     if (!s_status.initialized)
@@ -213,6 +214,14 @@ void AppTaskManager_Update(void)
         case APP_TASK_MANAGER_FAULT:
         default:
             break;
+    }
+
+    if (AppTaskPort_GetElapsedMs(
+            s_status.task,
+            now_ms,
+            &task_elapsed_ms))
+    {
+        s_status.elapsed_ms = task_elapsed_ms;
     }
 }
 

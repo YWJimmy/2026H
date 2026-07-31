@@ -6,6 +6,7 @@
 #include "line_follow_control.h"
 #include "line_sensor.h"
 #include "task2_lap_stop.h"
+#include "task4_ab_hold.h"
 
 static bool s_initialized = false;
 static bool s_active = false;
@@ -25,6 +26,11 @@ bool AppTaskPort_Init(void)
         s_fault_detail = Task2LapStop_GetFaultDetail();
         return false;
     }
+    if (!Task4AbHold_Init())
+    {
+        s_fault_detail = Task4AbHold_GetFaultDetail();
+        return false;
+    }
 
     s_initialized = true;
     return true;
@@ -39,20 +45,33 @@ bool AppTaskPort_Start(
         return false;
     }
 
-    if (task != TASK_MENU_TASK_2_LAP_STOP)
+    s_task = task;
+    s_fault_detail = 0U;
+
+    if (task == TASK_MENU_TASK_2_LAP_STOP)
+    {
+        s_active = Task2LapStop_Start(start_timestamp_ms);
+        if (!s_active)
+        {
+            s_fault_detail = Task2LapStop_GetFaultDetail();
+        }
+        return s_active;
+    }
+
+    if (task == TASK_MENU_TASK_4_AB_HOLD)
+    {
+        s_active = Task4AbHold_Start(start_timestamp_ms);
+        if (!s_active)
+        {
+            s_fault_detail = Task4AbHold_GetFaultDetail();
+        }
+        return s_active;
+    }
+
     {
         s_fault_detail = 100U + (uint32_t)task;
         return false;
     }
-
-    s_task = task;
-    s_fault_detail = 0U;
-    s_active = Task2LapStop_Start(start_timestamp_ms);
-    if (!s_active)
-    {
-        s_fault_detail = Task2LapStop_GetFaultDetail();
-    }
-    return s_active;
 }
 
 void AppTaskPort_ProcessInputs(void)
@@ -67,8 +86,6 @@ AppTaskPortResult_t AppTaskPort_Update(
     TaskMenuTask_t task,
     uint32_t now_ms)
 {
-    Task2LapStopResult_t result;
-
     if ((!s_initialized) || (task != s_task))
     {
         return APP_TASK_PORT_RESULT_FAULT;
@@ -76,22 +93,55 @@ AppTaskPortResult_t AppTaskPort_Update(
 
     if (!s_active)
     {
-        return Task2LapStop_IsStopped() ?
-            APP_TASK_PORT_RESULT_FINISHED :
-            APP_TASK_PORT_RESULT_FAULT;
-    }
-
-    result = Task2LapStop_Update(now_ms);
-    if (result == TASK2_LAP_STOP_RESULT_FINISHED)
-    {
-        return APP_TASK_PORT_RESULT_FINISHED;
-    }
-    if (result == TASK2_LAP_STOP_RESULT_FAULT)
-    {
-        s_fault_detail = Task2LapStop_GetFaultDetail();
+        if ((task == TASK_MENU_TASK_2_LAP_STOP) &&
+            Task2LapStop_IsStopped())
+        {
+            return APP_TASK_PORT_RESULT_FINISHED;
+        }
+        if ((task == TASK_MENU_TASK_4_AB_HOLD) &&
+            Task4AbHold_IsStopped())
+        {
+            return APP_TASK_PORT_RESULT_FINISHED;
+        }
         return APP_TASK_PORT_RESULT_FAULT;
     }
-    return APP_TASK_PORT_RESULT_RUNNING;
+
+    if (task == TASK_MENU_TASK_2_LAP_STOP)
+    {
+        Task2LapStopResult_t result =
+            Task2LapStop_Update(now_ms);
+
+        if (result == TASK2_LAP_STOP_RESULT_FINISHED)
+        {
+            return APP_TASK_PORT_RESULT_FINISHED;
+        }
+        if (result == TASK2_LAP_STOP_RESULT_FAULT)
+        {
+            s_fault_detail = Task2LapStop_GetFaultDetail();
+            return APP_TASK_PORT_RESULT_FAULT;
+        }
+        return APP_TASK_PORT_RESULT_RUNNING;
+    }
+
+    if (task == TASK_MENU_TASK_4_AB_HOLD)
+    {
+        Task4AbHoldResult_t result =
+            Task4AbHold_Update(now_ms);
+
+        if (result == TASK4_AB_HOLD_RESULT_FINISHED)
+        {
+            return APP_TASK_PORT_RESULT_FINISHED;
+        }
+        if (result == TASK4_AB_HOLD_RESULT_FAULT)
+        {
+            s_fault_detail = Task4AbHold_GetFaultDetail();
+            return APP_TASK_PORT_RESULT_FAULT;
+        }
+        return APP_TASK_PORT_RESULT_RUNNING;
+    }
+
+    s_fault_detail = 100U + (uint32_t)task;
+    return APP_TASK_PORT_RESULT_FAULT;
 }
 
 bool AppTaskPort_RequestStop(
@@ -103,13 +153,29 @@ bool AppTaskPort_RequestStop(
         return false;
     }
 
-    if (!Task2LapStop_RequestStop())
+    if ((task == TASK_MENU_TASK_2_LAP_STOP) &&
+        !Task2LapStop_RequestStop())
     {
         s_fault_detail = Task2LapStop_GetFaultDetail();
         return false;
     }
+    if ((task == TASK_MENU_TASK_4_AB_HOLD) &&
+        !Task4AbHold_RequestStop())
+    {
+        s_fault_detail = Task4AbHold_GetFaultDetail();
+        return false;
+    }
+    if ((task != TASK_MENU_TASK_2_LAP_STOP) &&
+        (task != TASK_MENU_TASK_4_AB_HOLD))
+    {
+        s_fault_detail = 100U + (uint32_t)task;
+        return false;
+    }
 
-    if (Task2LapStop_IsStopped())
+    if (((task == TASK_MENU_TASK_2_LAP_STOP) &&
+         Task2LapStop_IsStopped()) ||
+        ((task == TASK_MENU_TASK_4_AB_HOLD) &&
+         Task4AbHold_IsStopped()))
     {
         s_active = false;
     }
@@ -125,7 +191,10 @@ bool AppTaskPort_IsStopped(
         return false;
     }
 
-    if (Task2LapStop_IsStopped())
+    if (((task == TASK_MENU_TASK_2_LAP_STOP) &&
+         Task2LapStop_IsStopped()) ||
+        ((task == TASK_MENU_TASK_4_AB_HOLD) &&
+         Task4AbHold_IsStopped()))
     {
         s_active = false;
     }
@@ -136,6 +205,7 @@ void AppTaskPort_ForceSafeStop(void)
 {
     s_active = false;
     Task2LapStop_ForceSafeStop();
+    Task4AbHold_ForceSafeStop();
 
     if (LineFollowControl_IsInitialized())
     {
@@ -172,7 +242,29 @@ const char *AppTaskPort_GetPhaseText(void)
     {
         return Task2LapStop_GetPhaseText();
     }
+    if (s_task == TASK_MENU_TASK_4_AB_HOLD)
+    {
+        return Task4AbHold_GetPhaseText();
+    }
     return "TASK UNSUPPORTED";
+}
+
+bool AppTaskPort_GetElapsedMs(
+    TaskMenuTask_t task,
+    uint32_t now_ms,
+    uint32_t *elapsed_ms)
+{
+    if ((!s_initialized) || (task != s_task))
+    {
+        return false;
+    }
+    if (task == TASK_MENU_TASK_4_AB_HOLD)
+    {
+        return Task4AbHold_GetElapsedMs(
+            now_ms,
+            elapsed_ms);
+    }
+    return false;
 }
 
 uint32_t AppTaskPort_GetFaultDetail(void)

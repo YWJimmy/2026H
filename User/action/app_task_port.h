@@ -52,6 +52,10 @@ void AppTaskPort_Reset(void);
 
 const char *AppTaskPort_GetPhaseText(void);
 uint32_t AppTaskPort_GetFaultDetail(void);
+bool AppTaskPort_GetElapsedMs(
+    TaskMenuTask_t task,
+    uint32_t now_ms,
+    uint32_t *elapsed_ms);
 
 #ifdef __cplusplus
 }

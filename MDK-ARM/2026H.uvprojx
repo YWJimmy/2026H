@@ -829,6 +829,11 @@
               <FileType>1</FileType>
               <FilePath>..\User\action\task2_lap_stop.c</FilePath>
             </File>
+            <File>
+              <FileName>task4_ab_hold.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\action\task4_ab_hold.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
