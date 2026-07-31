@@ -8,6 +8,7 @@
 #include "task2_lap_stop.h"
 #include "task4_ab_hold.h"
 #include "task5_lap_hold.h"
+#include "task6_lap_target.h"
 
 static bool s_initialized = false;
 static bool s_active = false;
@@ -35,6 +36,11 @@ bool AppTaskPort_Init(void)
     if (!Task5LapHold_Init())
     {
         s_fault_detail = Task5LapHold_GetFaultDetail();
+        return false;
+    }
+    if (!Task6LapTarget_Init())
+    {
+        s_fault_detail = Task6LapTarget_GetFaultDetail();
         return false;
     }
 
@@ -84,6 +90,16 @@ bool AppTaskPort_Start(
         return s_active;
     }
 
+    if (task == TASK_MENU_TASK_6_LAP_TARGET)
+    {
+        s_active = Task6LapTarget_Start(start_timestamp_ms);
+        if (!s_active)
+        {
+            s_fault_detail = Task6LapTarget_GetFaultDetail();
+        }
+        return s_active;
+    }
+
     {
         s_fault_detail = 100U + (uint32_t)task;
         return false;
@@ -121,6 +137,11 @@ AppTaskPortResult_t AppTaskPort_Update(
         }
         if ((task == TASK_MENU_TASK_5_LAP_HOLD) &&
             Task5LapHold_IsStopped())
+        {
+            return APP_TASK_PORT_RESULT_FINISHED;
+        }
+        if ((task == TASK_MENU_TASK_6_LAP_TARGET) &&
+            Task6LapTarget_IsStopped())
         {
             return APP_TASK_PORT_RESULT_FINISHED;
         }
@@ -178,6 +199,23 @@ AppTaskPortResult_t AppTaskPort_Update(
         return APP_TASK_PORT_RESULT_RUNNING;
     }
 
+    if (task == TASK_MENU_TASK_6_LAP_TARGET)
+    {
+        Task6LapTargetResult_t result =
+            Task6LapTarget_Update(now_ms);
+
+        if (result == TASK6_LAP_TARGET_RESULT_FINISHED)
+        {
+            return APP_TASK_PORT_RESULT_FINISHED;
+        }
+        if (result == TASK6_LAP_TARGET_RESULT_FAULT)
+        {
+            s_fault_detail = Task6LapTarget_GetFaultDetail();
+            return APP_TASK_PORT_RESULT_FAULT;
+        }
+        return APP_TASK_PORT_RESULT_RUNNING;
+    }
+
     s_fault_detail = 100U + (uint32_t)task;
     return APP_TASK_PORT_RESULT_FAULT;
 }
@@ -209,9 +247,16 @@ bool AppTaskPort_RequestStop(
         s_fault_detail = Task5LapHold_GetFaultDetail();
         return false;
     }
+    if ((task == TASK_MENU_TASK_6_LAP_TARGET) &&
+        !Task6LapTarget_RequestStop())
+    {
+        s_fault_detail = Task6LapTarget_GetFaultDetail();
+        return false;
+    }
     if ((task != TASK_MENU_TASK_2_LAP_STOP) &&
         (task != TASK_MENU_TASK_4_AB_HOLD) &&
-        (task != TASK_MENU_TASK_5_LAP_HOLD))
+        (task != TASK_MENU_TASK_5_LAP_HOLD) &&
+        (task != TASK_MENU_TASK_6_LAP_TARGET))
     {
         s_fault_detail = 100U + (uint32_t)task;
         return false;
@@ -222,7 +267,9 @@ bool AppTaskPort_RequestStop(
         ((task == TASK_MENU_TASK_4_AB_HOLD) &&
          Task4AbHold_IsStopped()) ||
         ((task == TASK_MENU_TASK_5_LAP_HOLD) &&
-         Task5LapHold_IsStopped()))
+         Task5LapHold_IsStopped()) ||
+        ((task == TASK_MENU_TASK_6_LAP_TARGET) &&
+         Task6LapTarget_IsStopped()))
     {
         s_active = false;
     }
@@ -243,7 +290,9 @@ bool AppTaskPort_IsStopped(
         ((task == TASK_MENU_TASK_4_AB_HOLD) &&
          Task4AbHold_IsStopped()) ||
         ((task == TASK_MENU_TASK_5_LAP_HOLD) &&
-         Task5LapHold_IsStopped()))
+         Task5LapHold_IsStopped()) ||
+        ((task == TASK_MENU_TASK_6_LAP_TARGET) &&
+         Task6LapTarget_IsStopped()))
     {
         s_active = false;
     }
@@ -256,6 +305,7 @@ void AppTaskPort_ForceSafeStop(void)
     Task2LapStop_ForceSafeStop();
     Task4AbHold_ForceSafeStop();
     Task5LapHold_ForceSafeStop();
+    Task6LapTarget_ForceSafeStop();
 
     if (LineFollowControl_IsInitialized())
     {
@@ -300,6 +350,10 @@ const char *AppTaskPort_GetPhaseText(void)
     {
         return Task5LapHold_GetPhaseText();
     }
+    if (s_task == TASK_MENU_TASK_6_LAP_TARGET)
+    {
+        return Task6LapTarget_GetPhaseText();
+    }
     return "TASK UNSUPPORTED";
 }
 
@@ -321,6 +375,12 @@ bool AppTaskPort_GetElapsedMs(
     if (task == TASK_MENU_TASK_5_LAP_HOLD)
     {
         return Task5LapHold_GetElapsedMs(
+            now_ms,
+            elapsed_ms);
+    }
+    if (task == TASK_MENU_TASK_6_LAP_TARGET)
+    {
+        return Task6LapTarget_GetElapsedMs(
             now_ms,
             elapsed_ms);
     }
