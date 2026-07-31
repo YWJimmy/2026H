@@ -5,7 +5,7 @@
 
 #include "app_config.h"
 
-#define TASK2_PREDECEL_DISTANCE_MM             ((uint32_t)5800U)
+#define TASK2_PREDECEL_DISTANCE_MM             ((uint32_t)5400U)
 #define TASK2_PREDECEL_CENTER_SPEED_MM_S       ((int32_t)220)
 #define TASK2_PREDECEL_MIN_SPEED_MM_S          ((int32_t)220)
 
