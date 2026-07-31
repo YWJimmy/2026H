@@ -1,0 +1,854 @@
+diff -ruN /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/CameraWebServer_MaxFPS/CameraWebServer_MaxFPS.ino /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/CameraWebServer_MaxFPS/CameraWebServer_MaxFPS.ino
+--- /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/CameraWebServer_MaxFPS/CameraWebServer_MaxFPS.ino	2026-07-31 03:51:09.000000000 +0000
++++ /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/CameraWebServer_MaxFPS/CameraWebServer_MaxFPS.ino	2026-07-31 08:29:45.929839867 +0000
+@@ -4,8 +4,8 @@
+ 
+ // ============================================================
+ // Hiwonder ESP32-S3-Cam / GC2145
+-// QVGA Ball Detect V7 for Arduino-ESP32 2.0.11
+-// Priority: fixed 320x240, stable Start/Stop, lightweight steel-ball ROI detection.
++// QVGA Ball Detect V8 HQ for Arduino-ESP32 2.0.11
++// Priority: JPEG quality 72, fixed 320x240, smoother stream, lightweight steel-ball ROI detection.
+ // ============================================================
+ 
+ //#define CAMERA_MODEL_WROVER_KIT
+@@ -61,7 +61,7 @@
+   config.frame_size = STREAM_FRAME_SIZE;
+   config.jpeg_quality = SOFTWARE_JPEG_QUALITY;  // RGB565 capture ignores this.
+ 
+-  // V7: keep the 153600-byte QVGA raw frame out of internal RAM.
++  // V8: keep the 153600-byte QVGA raw frame out of internal RAM.
+   // Internal RAM is reserved for Wi-Fi, TCP, HTTP and the JPEG working buffer.
+   config.fb_location = CAMERA_FB_IN_PSRAM;
+   config.fb_count = 1;
+@@ -118,6 +118,16 @@
+     sensor->set_awb_gain(sensor, 1);
+     sensor->set_exposure_ctrl(sensor, 1);
+     sensor->set_gain_ctrl(sensor, 1);
++
++    // Sensor-side detail enhancement costs essentially no ESP32 CPU per frame.
++    // These controls are supported by the GC2145 driver used by the Hiwonder UI.
++    sensor->set_bpc(sensor, 1);
++    sensor->set_wpc(sensor, 1);
++    sensor->set_raw_gma(sensor, 1);
++    sensor->set_lenc(sensor, 1);
++    sensor->set_sharpness(sensor, 1);
++    sensor->set_contrast(sensor, 1);
++    sensor->set_saturation(sensor, 0);
+   }
+ 
+   // Let GC2145 auto exposure/white balance settle before Start is pressed.
+@@ -134,7 +144,7 @@
+   Serial.begin(115200);
+   delay(600);
+   Serial.println();
+-  Serial.println("ESP32-S3 GC2145 QVGA Ball Detect V7 (Arduino 2.0.11)");
++  Serial.println("ESP32-S3 GC2145 QVGA Ball Detect V8 HQ (Arduino 2.0.11)");
+   Serial.printf("PSRAM detected: %s\n", psramFound() ? "YES" : "NO");
+ 
+   IPAddress camera_ip;
+@@ -144,7 +154,7 @@
+   }
+ 
+   if (!psramFound()) {
+-    Serial.println("FATAL: PSRAM is required for V7 QVGA mode");
++    Serial.println("FATAL: PSRAM is required for V8 QVGA mode");
+     return;
+   }
+ 
+diff -ruN /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/CameraWebServer_MaxFPS/app_httpd.cpp /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/CameraWebServer_MaxFPS/app_httpd.cpp
+--- /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/CameraWebServer_MaxFPS/app_httpd.cpp	2026-07-31 03:51:09.000000000 +0000
++++ /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/CameraWebServer_MaxFPS/app_httpd.cpp	2026-07-31 08:29:45.929839867 +0000
+@@ -8,13 +8,13 @@
+ #include "stream_profile.h"
+ 
+ // ============================================================
+-// GC2145 QVGA Ball Detect V7 MJPEG server
++// GC2145 QVGA Ball Detect V8 HQ MJPEG server
+ // - 320x240 RGB565, single framebuffer in PSRAM
+-// - Persistent 64 KB JPEG buffer; no per-frame allocation/free
++// - Persistent 80 KB JPEG buffer; no per-frame allocation/free
+ // - Exactly one active stream
+ // - Start first closes any stale stream; Stop actively shuts it down
+-// - Fixed green-tube ROI steel-ball detection and red overlay
+-// - No periodic performance logging
++// - Alternate-frame local/full ROI steel-ball detection and red overlay
++// - JPEG quality 72, larger network chunks, no periodic performance logging
+ // ============================================================
+ 
+ #define PART_BOUNDARY "123456789000000000000987654321"
+@@ -51,12 +51,14 @@
+   bool valid;
+   int x;
+   uint8_t missed_frames;
++  uint32_t frame_counter;
+ };
+ 
+ static ball_tracker_t ball_tracker = {
+     .valid = false,
+     .x = 0,
+     .missed_frames = 0,
++    .frame_counter = 0,
+ };
+ 
+ static inline void unpackRgb565BigEndian(const uint8_t *pixel,
+@@ -106,7 +108,7 @@
+   }
+ }
+ 
+-static ball_detection_t detectSteelBall(const camera_fb_t *fb) {
++static ball_detection_t detectSteelBall(const camera_fb_t *fb, int scan_x0, int scan_x1) {
+   ball_detection_t result = {
+       .found = false,
+       .x = 0,
+@@ -119,14 +121,21 @@
+     return result;
+   }
+ 
+-  constexpr int roi_width = BALL_ROI_X1 - BALL_ROI_X0 + 1;
+-  uint8_t bright_count[roi_width];
+-  uint8_t neutral_count[roi_width];
+-  uint8_t min_luma[roi_width];
+-  uint8_t max_luma[roi_width];
++  if (scan_x0 < BALL_ROI_X0) scan_x0 = BALL_ROI_X0;
++  if (scan_x1 > BALL_ROI_X1) scan_x1 = BALL_ROI_X1;
++  if (scan_x1 - scan_x0 + 1 <= BALL_WINDOW_RADIUS * 2) {
++    return result;
++  }
+ 
+-  for (int column = 0; column < roi_width; ++column) {
+-    const int x = BALL_ROI_X0 + column;
++  constexpr int max_roi_width = BALL_ROI_X1 - BALL_ROI_X0 + 1;
++  const int scan_width = scan_x1 - scan_x0 + 1;
++  uint8_t bright_count[max_roi_width];
++  uint8_t neutral_count[max_roi_width];
++  uint8_t min_luma[max_roi_width];
++  uint8_t max_luma[max_roi_width];
++
++  for (int column = 0; column < scan_width; ++column) {
++    const int x = scan_x0 + column;
+     unsigned bright = 0;
+     unsigned neutral = 0;
+     uint8_t local_min = 255;
+@@ -171,7 +180,7 @@
+   }
+ 
+   for (int center = BALL_WINDOW_RADIUS;
+-       center < roi_width - BALL_WINDOW_RADIUS;
++       center < scan_width - BALL_WINDOW_RADIUS;
+        ++center) {
+     unsigned bright_sum = 0;
+     unsigned neutral_sum = 0;
+@@ -200,7 +209,7 @@
+                       (contrast * 3) / 2;
+     if (score > result.score) {
+       result.score = score;
+-      result.x = BALL_ROI_X0 + center;
++      result.x = scan_x0 + center;
+     }
+   }
+ 
+@@ -209,28 +218,51 @@
+ }
+ 
+ static void detectTrackAndDrawBall(camera_fb_t *fb) {
+-  const ball_detection_t detection = detectSteelBall(fb);
++  ++ball_tracker.frame_counter;
+ 
+-  if (detection.found) {
+-    if (ball_tracker.valid) {
+-      const int delta = detection.x - ball_tracker.x;
+-      const int absolute_delta = (delta < 0) ? -delta : delta;
+-      if (absolute_delta <= 30) {
+-        // Mild horizontal smoothing without adding a visible tracking delay.
+-        ball_tracker.x = (ball_tracker.x * 2 + detection.x + 1) / 3;
++  // High JPEG quality dominates CPU time. Save detector work by classifying
++  // alternate frames while keeping the previous red box visible every frame.
++  const bool should_detect =
++      !ball_tracker.valid ||
++      (ball_tracker.frame_counter % BALL_DETECT_EVERY_N_FRAMES == 0);
++
++  if (should_detect) {
++    int scan_x0 = BALL_ROI_X0;
++    int scan_x1 = BALL_ROI_X1;
++
++    // Usually search near the last center. A periodic full scan recovers when
++    // the ball moves quickly or tracking was briefly wrong.
++    const bool full_scan =
++        !ball_tracker.valid ||
++        (ball_tracker.frame_counter % BALL_FULL_SCAN_EVERY_N_FRAMES == 0);
++    if (!full_scan) {
++      scan_x0 = ball_tracker.x - BALL_TRACK_SEARCH_RADIUS;
++      scan_x1 = ball_tracker.x + BALL_TRACK_SEARCH_RADIUS;
++    }
++
++    const ball_detection_t detection = detectSteelBall(fb, scan_x0, scan_x1);
++
++    if (detection.found) {
++      if (ball_tracker.valid) {
++        const int delta = detection.x - ball_tracker.x;
++        const int absolute_delta = (delta < 0) ? -delta : delta;
++        if (absolute_delta <= 30) {
++          // Mild horizontal smoothing without adding a visible tracking delay.
++          ball_tracker.x = (ball_tracker.x * 2 + detection.x + 1) / 3;
++        } else {
++          ball_tracker.x = detection.x;
++        }
+       } else {
+         ball_tracker.x = detection.x;
+       }
+-    } else {
+-      ball_tracker.x = detection.x;
+-    }
+-    ball_tracker.valid = true;
+-    ball_tracker.missed_frames = 0;
+-  } else if (ball_tracker.valid) {
+-    if (ball_tracker.missed_frames < BALL_HOLD_MISSED_FRAMES) {
+-      ++ball_tracker.missed_frames;
+-    } else {
+-      ball_tracker.valid = false;
++      ball_tracker.valid = true;
++      ball_tracker.missed_frames = 0;
++    } else if (ball_tracker.valid) {
++      if (ball_tracker.missed_frames < BALL_HOLD_MISSED_FRAMES) {
++        ++ball_tracker.missed_frames;
++      } else {
++        ball_tracker.valid = false;
++      }
+     }
+   }
+ 
+@@ -253,13 +285,16 @@
+   if (data == nullptr || len == 0) {
+     return 0;
+   }
+-  if (buffer->length + len > buffer->capacity) {
++  if (index + len > buffer->capacity) {
+     buffer->overflow = true;
+     return 0;
+   }
+ 
+-  memcpy(buffer->data + buffer->length, data, len);
+-  buffer->length += len;
++  memcpy(buffer->data + index, data, len);
++  const size_t new_length = index + len;
++  if (new_length > buffer->length) {
++    buffer->length = new_length;
++  }
+   return len;
+ }
+ 
+@@ -334,7 +369,7 @@
+ <head>
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+-<title>ESP32-S3 Steel Ball</title>
++<title>ESP32-S3 Steel Ball V8 HQ</title>
+ <style>
+ *{box-sizing:border-box}
+ html,body{margin:0;min-height:100%;background:#000;color:#eee;font-family:Arial,sans-serif}
+@@ -525,11 +560,11 @@
+         break;
+       }
+       offset += send_len;
+-      taskYIELD();
+     }
+     if (res != ESP_OK) {
+       break;
+     }
++    taskYIELD();
+   }
+ 
+   free(jpeg_memory);
+diff -ruN /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/CameraWebServer_MaxFPS/stream_profile.h /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/CameraWebServer_MaxFPS/stream_profile.h
+--- /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/CameraWebServer_MaxFPS/stream_profile.h	2026-07-31 03:51:09.000000000 +0000
++++ /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/CameraWebServer_MaxFPS/stream_profile.h	2026-07-31 08:29:45.929839867 +0000
+@@ -2,19 +2,29 @@
+ 
+ // Fixed Hiwonder GC2145 profile: QVGA RGB565 + software JPEG.
+ #define STREAM_FRAME_SIZE FRAMESIZE_QVGA
+-#define STREAM_PROFILE_NAME "QVGA 320x240 / BALL ROI"
++#define STREAM_PROFILE_NAME "QVGA 320x240 / BALL ROI / HQ V8"
+ 
+ // frame2jpg_cb uses 0..100. Lower quality means less CPU time and less Wi-Fi data.
+-#define SOFTWARE_JPEG_QUALITY 25
++#define SOFTWARE_JPEG_QUALITY 72
+ 
+ // Persistent output buffer, allocated once per active stream.
+-#define JPEG_BUFFER_CAPACITY (64 * 1024)
++#define JPEG_BUFFER_CAPACITY (80 * 1024)
+ 
+ // Preserve internal RAM for Wi-Fi/TCP before choosing an internal JPEG buffer.
+-#define INTERNAL_RAM_RESERVE (48 * 1024)
++#define INTERNAL_RAM_RESERVE (96 * 1024)
+ 
+ // Send large JPEG frames in smaller transport chunks.
+-#define NETWORK_SEND_CHUNK (8 * 1024)
++#define NETWORK_SEND_CHUNK (24 * 1024)
++
++
++// Run the relatively expensive ROI classifier only on alternate frames.
++// The last valid box is still drawn on every streamed frame.
++#define BALL_DETECT_EVERY_N_FRAMES 2
++
++// When tracking is valid, scan only around the previous center most of the
++// time; periodically scan the full tube to recover from rapid movement.
++#define BALL_FULL_SCAN_EVERY_N_FRAMES 8
++#define BALL_TRACK_SEARCH_RADIUS 42
+ 
+ // -----------------------------------------------------------------------------
+ // Steel-ball ROI for the fixed 320x240 camera view.
+diff -ruN /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/README_V7_CN.md /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/README_V7_CN.md
+--- /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/README_V7_CN.md	2026-07-31 03:51:09.000000000 +0000
++++ /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/README_V7_CN.md	1970-01-01 00:00:00.000000000 +0000
+@@ -1,66 +0,0 @@
+-# ESP32-S3 GC2145 钢球识别图传 V7
+-
+-## 固定配置
+-
+-- 幻尔 ESP32S3-Cam，GC2145。
+-- Arduino-ESP32 2.0.11。
+-- AP 热点：`HW_ESP32S3CAM`。
+-- 网页：`http://192.168.5.1`。
+-- 分辨率：320×240。
+-- 图像格式：RGB565。
+-- 单缓冲，帧缓冲固定放在 PSRAM。
+-- 软件 JPEG 质量：25。
+-- 网页保持 Start / Stop。
+-- 不打印周期 FPS 数据。
+-
+-## 钢球识别方法
+-
+-V7 不进行全画面圆检测，也不使用霍夫圆或神经网络。根据用户提供的固定机位截图，只扫描绿色管道内腔：
+-
+-```text
+-X = 45 ... 285
+-Y = 111 ... 128
+-```
+-
+-算法寻找银灰钢球具有的：
+-
+-1. 低饱和度银灰高光；
+-2. 相对于绿色管道较弱的绿色优势；
+-3. 小范围内明显的亮暗反差。
+-
+-检测结果经过轻微横向平滑和3帧短暂保持，再直接在 RGB565 原始帧上绘制2像素红色方框，然后进行 JPEG 压缩，因此手机网页能够看到红框。
+-
+-## 预计性能
+-
+-ROI 只有约 241×18，检测每帧扫描约4300个像素，不需要动态内存，也不做全图连通域。相对于320×240 RGB565软件JPEG压缩，新增识别开销通常较小，但实际帧率需要实机测试。
+-
+-## 调参位置
+-
+-所有参数位于：
+-
+-```text
+-CameraWebServer_MaxFPS/stream_profile.h
+-```
+-
+-如果管道位置与截图略有变化，优先修改：
+-
+-```cpp
+-#define BALL_ROI_X0 45
+-#define BALL_ROI_X1 285
+-#define BALL_ROI_Y0 111
+-#define BALL_ROI_Y1 128
+-```
+-
+-如果出现误框，提高：
+-
+-```cpp
+-#define BALL_SCORE_THRESHOLD 250
+-```
+-
+-例如改成 280 或 300。
+-
+-如果钢球明显存在但没有框，逐步降低到 230 或 210；也可以适当降低 `BALL_BRIGHT_LUMA_MIN`。
+-
+-## 注意
+-
+-当前参数只根据一张截图标定。钢球的实际反光会随照明改变，因此第一次实机测试后，可能还需根据误检或漏检结果微调阈值。
+diff -ruN /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/README_V8_CN.md /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/README_V8_CN.md
+--- /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/README_V8_CN.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/README_V8_CN.md	2026-07-31 08:32:37.353843210 +0000
+@@ -0,0 +1,51 @@
++# ESP32S3 GC2145 钢球识别图传 V8 HQ
++
++适配环境：
++
++- 幻尔 ESP32S3-Cam / GC2145
++- Arduino-ESP32 2.0.11
++- Board：ESP32S3 Dev Module
++- PSRAM：OPI PSRAM
++- 分辨率：QVGA 320×240
++- RGB565 单缓冲，帧缓冲位于 PSRAM
++- AP 热点：`HW_ESP32S3CAM`
++- 网页：`http://192.168.5.1`
++
++## V8 默认画质
++
++```cpp
++#define SOFTWARE_JPEG_QUALITY 72
++```
++
++这是在用户实测 JPEG 质量 70 能稳定运行的基础上，小幅提高画质后的默认值。
++
++## 相比 V7 的优化
++
++1. 钢球识别由每帧全 ROI 扫描，改为每 2 帧识别一次；未识别帧继续绘制上一次有效红框。
++2. 跟踪有效时只扫描上次钢球中心左右 42 像素，每 8 帧执行一次完整管道 ROI 扫描，兼顾速度和失锁恢复。
++3. JPEG 网络发送块由 8 KB 增大到 24 KB，减少每帧 HTTP 分块调用次数。
++4. 移除每个网络分块后的主动 `taskYIELD()`，改为每帧发送完成后让出一次任务。
++5. JPEG 持久缓冲提高到 80 KB，降低质量 72 时因单帧过大而丢帧的概率。
++6. 内部 RAM 保留量提高到 96 KB；连续内部 RAM 不足时自动把 JPEG 缓冲放入 PSRAM，避免挤压 Wi-Fi/TCP。
++7. 开启 GC2145 的 BPC、WPC、Raw GMA、Lens Correction，并设置轻度锐化和对比度增强。这些属于传感器侧处理，几乎不增加 ESP32 每帧 CPU 开销。
++8. 保留 V7 的 320×240、单缓冲、Start/Stop、固定 ROI、红色钢球框、旧连接释放和单视频流保护。
++
++## 可调参数
++
++文件：`CameraWebServer_MaxFPS/stream_profile.h`
++
++```cpp
++#define SOFTWARE_JPEG_QUALITY 72
++#define BALL_DETECT_EVERY_N_FRAMES 2
++#define BALL_FULL_SCAN_EVERY_N_FRAMES 8
++#define BALL_TRACK_SEARCH_RADIUS 42
++```
++
++- 画质仍不够：将质量改为 75；不建议直接超过 80。
++- 帧率仍低：先将质量恢复到 70，而不是降低分辨率。
++- 钢球移动很快导致红框跟不上：将检测间隔改为 1，或搜索半径增大到 55。
++- 钢球运动较慢且优先帧率：可将检测间隔改为 3。
++
++## 说明
++
++该版本已进行源码静态语法检查和 ZIP 完整性检查，但无法替代幻尔实物板上的实际帧率、画质和识别测试。质量 72 的实际提升取决于画面复杂度、光照、手机浏览器和供电稳定性。
+diff -ruN /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/V7_to_V8.diff /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/V7_to_V8.diff
+--- /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/V7_to_V8.diff	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/V7_to_V8.diff	2026-07-31 08:32:37.353843210 +0000
+@@ -0,0 +1,425 @@
++diff -ruN /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/CameraWebServer_MaxFPS/CameraWebServer_MaxFPS.ino /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/CameraWebServer_MaxFPS/CameraWebServer_MaxFPS.ino
++--- /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/CameraWebServer_MaxFPS/CameraWebServer_MaxFPS.ino	2026-07-31 03:51:09.000000000 +0000
+++++ /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/CameraWebServer_MaxFPS/CameraWebServer_MaxFPS.ino	2026-07-31 08:29:45.929839867 +0000
++@@ -4,8 +4,8 @@
++ 
++ // ============================================================
++ // Hiwonder ESP32-S3-Cam / GC2145
++-// QVGA Ball Detect V7 for Arduino-ESP32 2.0.11
++-// Priority: fixed 320x240, stable Start/Stop, lightweight steel-ball ROI detection.
+++// QVGA Ball Detect V8 HQ for Arduino-ESP32 2.0.11
+++// Priority: JPEG quality 72, fixed 320x240, smoother stream, lightweight steel-ball ROI detection.
++ // ============================================================
++ 
++ //#define CAMERA_MODEL_WROVER_KIT
++@@ -61,7 +61,7 @@
++   config.frame_size = STREAM_FRAME_SIZE;
++   config.jpeg_quality = SOFTWARE_JPEG_QUALITY;  // RGB565 capture ignores this.
++ 
++-  // V7: keep the 153600-byte QVGA raw frame out of internal RAM.
+++  // V8: keep the 153600-byte QVGA raw frame out of internal RAM.
++   // Internal RAM is reserved for Wi-Fi, TCP, HTTP and the JPEG working buffer.
++   config.fb_location = CAMERA_FB_IN_PSRAM;
++   config.fb_count = 1;
++@@ -118,6 +118,16 @@
++     sensor->set_awb_gain(sensor, 1);
++     sensor->set_exposure_ctrl(sensor, 1);
++     sensor->set_gain_ctrl(sensor, 1);
+++
+++    // Sensor-side detail enhancement costs essentially no ESP32 CPU per frame.
+++    // These controls are supported by the GC2145 driver used by the Hiwonder UI.
+++    sensor->set_bpc(sensor, 1);
+++    sensor->set_wpc(sensor, 1);
+++    sensor->set_raw_gma(sensor, 1);
+++    sensor->set_lenc(sensor, 1);
+++    sensor->set_sharpness(sensor, 1);
+++    sensor->set_contrast(sensor, 1);
+++    sensor->set_saturation(sensor, 0);
++   }
++ 
++   // Let GC2145 auto exposure/white balance settle before Start is pressed.
++@@ -134,7 +144,7 @@
++   Serial.begin(115200);
++   delay(600);
++   Serial.println();
++-  Serial.println("ESP32-S3 GC2145 QVGA Ball Detect V7 (Arduino 2.0.11)");
+++  Serial.println("ESP32-S3 GC2145 QVGA Ball Detect V8 HQ (Arduino 2.0.11)");
++   Serial.printf("PSRAM detected: %s\n", psramFound() ? "YES" : "NO");
++ 
++   IPAddress camera_ip;
++@@ -144,7 +154,7 @@
++   }
++ 
++   if (!psramFound()) {
++-    Serial.println("FATAL: PSRAM is required for V7 QVGA mode");
+++    Serial.println("FATAL: PSRAM is required for V8 QVGA mode");
++     return;
++   }
++ 
++diff -ruN /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/CameraWebServer_MaxFPS/app_httpd.cpp /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/CameraWebServer_MaxFPS/app_httpd.cpp
++--- /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/CameraWebServer_MaxFPS/app_httpd.cpp	2026-07-31 03:51:09.000000000 +0000
+++++ /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/CameraWebServer_MaxFPS/app_httpd.cpp	2026-07-31 08:29:45.929839867 +0000
++@@ -8,13 +8,13 @@
++ #include "stream_profile.h"
++ 
++ // ============================================================
++-// GC2145 QVGA Ball Detect V7 MJPEG server
+++// GC2145 QVGA Ball Detect V8 HQ MJPEG server
++ // - 320x240 RGB565, single framebuffer in PSRAM
++-// - Persistent 64 KB JPEG buffer; no per-frame allocation/free
+++// - Persistent 80 KB JPEG buffer; no per-frame allocation/free
++ // - Exactly one active stream
++ // - Start first closes any stale stream; Stop actively shuts it down
++-// - Fixed green-tube ROI steel-ball detection and red overlay
++-// - No periodic performance logging
+++// - Alternate-frame local/full ROI steel-ball detection and red overlay
+++// - JPEG quality 72, larger network chunks, no periodic performance logging
++ // ============================================================
++ 
++ #define PART_BOUNDARY "123456789000000000000987654321"
++@@ -51,12 +51,14 @@
++   bool valid;
++   int x;
++   uint8_t missed_frames;
+++  uint32_t frame_counter;
++ };
++ 
++ static ball_tracker_t ball_tracker = {
++     .valid = false,
++     .x = 0,
++     .missed_frames = 0,
+++    .frame_counter = 0,
++ };
++ 
++ static inline void unpackRgb565BigEndian(const uint8_t *pixel,
++@@ -106,7 +108,7 @@
++   }
++ }
++ 
++-static ball_detection_t detectSteelBall(const camera_fb_t *fb) {
+++static ball_detection_t detectSteelBall(const camera_fb_t *fb, int scan_x0, int scan_x1) {
++   ball_detection_t result = {
++       .found = false,
++       .x = 0,
++@@ -119,14 +121,21 @@
++     return result;
++   }
++ 
++-  constexpr int roi_width = BALL_ROI_X1 - BALL_ROI_X0 + 1;
++-  uint8_t bright_count[roi_width];
++-  uint8_t neutral_count[roi_width];
++-  uint8_t min_luma[roi_width];
++-  uint8_t max_luma[roi_width];
+++  if (scan_x0 < BALL_ROI_X0) scan_x0 = BALL_ROI_X0;
+++  if (scan_x1 > BALL_ROI_X1) scan_x1 = BALL_ROI_X1;
+++  if (scan_x1 - scan_x0 + 1 <= BALL_WINDOW_RADIUS * 2) {
+++    return result;
+++  }
++ 
++-  for (int column = 0; column < roi_width; ++column) {
++-    const int x = BALL_ROI_X0 + column;
+++  constexpr int max_roi_width = BALL_ROI_X1 - BALL_ROI_X0 + 1;
+++  const int scan_width = scan_x1 - scan_x0 + 1;
+++  uint8_t bright_count[max_roi_width];
+++  uint8_t neutral_count[max_roi_width];
+++  uint8_t min_luma[max_roi_width];
+++  uint8_t max_luma[max_roi_width];
+++
+++  for (int column = 0; column < scan_width; ++column) {
+++    const int x = scan_x0 + column;
++     unsigned bright = 0;
++     unsigned neutral = 0;
++     uint8_t local_min = 255;
++@@ -171,7 +180,7 @@
++   }
++ 
++   for (int center = BALL_WINDOW_RADIUS;
++-       center < roi_width - BALL_WINDOW_RADIUS;
+++       center < scan_width - BALL_WINDOW_RADIUS;
++        ++center) {
++     unsigned bright_sum = 0;
++     unsigned neutral_sum = 0;
++@@ -200,7 +209,7 @@
++                       (contrast * 3) / 2;
++     if (score > result.score) {
++       result.score = score;
++-      result.x = BALL_ROI_X0 + center;
+++      result.x = scan_x0 + center;
++     }
++   }
++ 
++@@ -209,28 +218,51 @@
++ }
++ 
++ static void detectTrackAndDrawBall(camera_fb_t *fb) {
++-  const ball_detection_t detection = detectSteelBall(fb);
+++  ++ball_tracker.frame_counter;
++ 
++-  if (detection.found) {
++-    if (ball_tracker.valid) {
++-      const int delta = detection.x - ball_tracker.x;
++-      const int absolute_delta = (delta < 0) ? -delta : delta;
++-      if (absolute_delta <= 30) {
++-        // Mild horizontal smoothing without adding a visible tracking delay.
++-        ball_tracker.x = (ball_tracker.x * 2 + detection.x + 1) / 3;
+++  // High JPEG quality dominates CPU time. Save detector work by classifying
+++  // alternate frames while keeping the previous red box visible every frame.
+++  const bool should_detect =
+++      !ball_tracker.valid ||
+++      (ball_tracker.frame_counter % BALL_DETECT_EVERY_N_FRAMES == 0);
+++
+++  if (should_detect) {
+++    int scan_x0 = BALL_ROI_X0;
+++    int scan_x1 = BALL_ROI_X1;
+++
+++    // Usually search near the last center. A periodic full scan recovers when
+++    // the ball moves quickly or tracking was briefly wrong.
+++    const bool full_scan =
+++        !ball_tracker.valid ||
+++        (ball_tracker.frame_counter % BALL_FULL_SCAN_EVERY_N_FRAMES == 0);
+++    if (!full_scan) {
+++      scan_x0 = ball_tracker.x - BALL_TRACK_SEARCH_RADIUS;
+++      scan_x1 = ball_tracker.x + BALL_TRACK_SEARCH_RADIUS;
+++    }
+++
+++    const ball_detection_t detection = detectSteelBall(fb, scan_x0, scan_x1);
+++
+++    if (detection.found) {
+++      if (ball_tracker.valid) {
+++        const int delta = detection.x - ball_tracker.x;
+++        const int absolute_delta = (delta < 0) ? -delta : delta;
+++        if (absolute_delta <= 30) {
+++          // Mild horizontal smoothing without adding a visible tracking delay.
+++          ball_tracker.x = (ball_tracker.x * 2 + detection.x + 1) / 3;
+++        } else {
+++          ball_tracker.x = detection.x;
+++        }
++       } else {
++         ball_tracker.x = detection.x;
++       }
++-    } else {
++-      ball_tracker.x = detection.x;
++-    }
++-    ball_tracker.valid = true;
++-    ball_tracker.missed_frames = 0;
++-  } else if (ball_tracker.valid) {
++-    if (ball_tracker.missed_frames < BALL_HOLD_MISSED_FRAMES) {
++-      ++ball_tracker.missed_frames;
++-    } else {
++-      ball_tracker.valid = false;
+++      ball_tracker.valid = true;
+++      ball_tracker.missed_frames = 0;
+++    } else if (ball_tracker.valid) {
+++      if (ball_tracker.missed_frames < BALL_HOLD_MISSED_FRAMES) {
+++        ++ball_tracker.missed_frames;
+++      } else {
+++        ball_tracker.valid = false;
+++      }
++     }
++   }
++ 
++@@ -253,13 +285,16 @@
++   if (data == nullptr || len == 0) {
++     return 0;
++   }
++-  if (buffer->length + len > buffer->capacity) {
+++  if (index + len > buffer->capacity) {
++     buffer->overflow = true;
++     return 0;
++   }
++ 
++-  memcpy(buffer->data + buffer->length, data, len);
++-  buffer->length += len;
+++  memcpy(buffer->data + index, data, len);
+++  const size_t new_length = index + len;
+++  if (new_length > buffer->length) {
+++    buffer->length = new_length;
+++  }
++   return len;
++ }
++ 
++@@ -334,7 +369,7 @@
++ <head>
++ <meta charset="utf-8">
++ <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
++-<title>ESP32-S3 Steel Ball</title>
+++<title>ESP32-S3 Steel Ball V8 HQ</title>
++ <style>
++ *{box-sizing:border-box}
++ html,body{margin:0;min-height:100%;background:#000;color:#eee;font-family:Arial,sans-serif}
++@@ -525,11 +560,11 @@
++         break;
++       }
++       offset += send_len;
++-      taskYIELD();
++     }
++     if (res != ESP_OK) {
++       break;
++     }
+++    taskYIELD();
++   }
++ 
++   free(jpeg_memory);
++diff -ruN /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/CameraWebServer_MaxFPS/stream_profile.h /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/CameraWebServer_MaxFPS/stream_profile.h
++--- /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/CameraWebServer_MaxFPS/stream_profile.h	2026-07-31 03:51:09.000000000 +0000
+++++ /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/CameraWebServer_MaxFPS/stream_profile.h	2026-07-31 08:29:45.929839867 +0000
++@@ -2,19 +2,29 @@
++ 
++ // Fixed Hiwonder GC2145 profile: QVGA RGB565 + software JPEG.
++ #define STREAM_FRAME_SIZE FRAMESIZE_QVGA
++-#define STREAM_PROFILE_NAME "QVGA 320x240 / BALL ROI"
+++#define STREAM_PROFILE_NAME "QVGA 320x240 / BALL ROI / HQ V8"
++ 
++ // frame2jpg_cb uses 0..100. Lower quality means less CPU time and less Wi-Fi data.
++-#define SOFTWARE_JPEG_QUALITY 25
+++#define SOFTWARE_JPEG_QUALITY 72
++ 
++ // Persistent output buffer, allocated once per active stream.
++-#define JPEG_BUFFER_CAPACITY (64 * 1024)
+++#define JPEG_BUFFER_CAPACITY (80 * 1024)
++ 
++ // Preserve internal RAM for Wi-Fi/TCP before choosing an internal JPEG buffer.
++-#define INTERNAL_RAM_RESERVE (48 * 1024)
+++#define INTERNAL_RAM_RESERVE (96 * 1024)
++ 
++ // Send large JPEG frames in smaller transport chunks.
++-#define NETWORK_SEND_CHUNK (8 * 1024)
+++#define NETWORK_SEND_CHUNK (24 * 1024)
+++
+++
+++// Run the relatively expensive ROI classifier only on alternate frames.
+++// The last valid box is still drawn on every streamed frame.
+++#define BALL_DETECT_EVERY_N_FRAMES 2
+++
+++// When tracking is valid, scan only around the previous center most of the
+++// time; periodically scan the full tube to recover from rapid movement.
+++#define BALL_FULL_SCAN_EVERY_N_FRAMES 8
+++#define BALL_TRACK_SEARCH_RADIUS 42
++ 
++ // -----------------------------------------------------------------------------
++ // Steel-ball ROI for the fixed 320x240 camera view.
++diff -ruN /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/README_V7_CN.md /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/README_V7_CN.md
++--- /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/README_V7_CN.md	2026-07-31 03:51:09.000000000 +0000
+++++ /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/README_V7_CN.md	1970-01-01 00:00:00.000000000 +0000
++@@ -1,66 +0,0 @@
++-# ESP32-S3 GC2145 钢球识别图传 V7
++-
++-## 固定配置
++-
++-- 幻尔 ESP32S3-Cam，GC2145。
++-- Arduino-ESP32 2.0.11。
++-- AP 热点：`HW_ESP32S3CAM`。
++-- 网页：`http://192.168.5.1`。
++-- 分辨率：320×240。
++-- 图像格式：RGB565。
++-- 单缓冲，帧缓冲固定放在 PSRAM。
++-- 软件 JPEG 质量：25。
++-- 网页保持 Start / Stop。
++-- 不打印周期 FPS 数据。
++-
++-## 钢球识别方法
++-
++-V7 不进行全画面圆检测，也不使用霍夫圆或神经网络。根据用户提供的固定机位截图，只扫描绿色管道内腔：
++-
++-```text
++-X = 45 ... 285
++-Y = 111 ... 128
++-```
++-
++-算法寻找银灰钢球具有的：
++-
++-1. 低饱和度银灰高光；
++-2. 相对于绿色管道较弱的绿色优势；
++-3. 小范围内明显的亮暗反差。
++-
++-检测结果经过轻微横向平滑和3帧短暂保持，再直接在 RGB565 原始帧上绘制2像素红色方框，然后进行 JPEG 压缩，因此手机网页能够看到红框。
++-
++-## 预计性能
++-
++-ROI 只有约 241×18，检测每帧扫描约4300个像素，不需要动态内存，也不做全图连通域。相对于320×240 RGB565软件JPEG压缩，新增识别开销通常较小，但实际帧率需要实机测试。
++-
++-## 调参位置
++-
++-所有参数位于：
++-
++-```text
++-CameraWebServer_MaxFPS/stream_profile.h
++-```
++-
++-如果管道位置与截图略有变化，优先修改：
++-
++-```cpp
++-#define BALL_ROI_X0 45
++-#define BALL_ROI_X1 285
++-#define BALL_ROI_Y0 111
++-#define BALL_ROI_Y1 128
++-```
++-
++-如果出现误框，提高：
++-
++-```cpp
++-#define BALL_SCORE_THRESHOLD 250
++-```
++-
++-例如改成 280 或 300。
++-
++-如果钢球明显存在但没有框，逐步降低到 230 或 210；也可以适当降低 `BALL_BRIGHT_LUMA_MIN`。
++-
++-## 注意
++-
++-当前参数只根据一张截图标定。钢球的实际反光会随照明改变，因此第一次实机测试后，可能还需根据误检或漏检结果微调阈值。
++diff -ruN /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/README_V8_CN.md /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/README_V8_CN.md
++--- /mnt/data/v7_src/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V7_Arduino_2.0.11/README_V8_CN.md	1970-01-01 00:00:00.000000000 +0000
+++++ /mnt/data/ESP32S3_Camera_GC2145_AP_QVGA_BallDetect_V8_HQ_Arduino_2.0.11/README_V8_CN.md	2026-07-31 08:32:37.353843210 +0000
++@@ -0,0 +1,51 @@
+++# ESP32S3 GC2145 钢球识别图传 V8 HQ
+++
+++适配环境：
+++
+++- 幻尔 ESP32S3-Cam / GC2145
+++- Arduino-ESP32 2.0.11
+++- Board：ESP32S3 Dev Module
+++- PSRAM：OPI PSRAM
+++- 分辨率：QVGA 320×240
+++- RGB565 单缓冲，帧缓冲位于 PSRAM
+++- AP 热点：`HW_ESP32S3CAM`
+++- 网页：`http://192.168.5.1`
+++
+++## V8 默认画质
+++
+++```cpp
+++#define SOFTWARE_JPEG_QUALITY 72
+++```
+++
+++这是在用户实测 JPEG 质量 70 能稳定运行的基础上，小幅提高画质后的默认值。
+++
+++## 相比 V7 的优化
+++
+++1. 钢球识别由每帧全 ROI 扫描，改为每 2 帧识别一次；未识别帧继续绘制上一次有效红框。
+++2. 跟踪有效时只扫描上次钢球中心左右 42 像素，每 8 帧执行一次完整管道 ROI 扫描，兼顾速度和失锁恢复。
+++3. JPEG 网络发送块由 8 KB 增大到 24 KB，减少每帧 HTTP 分块调用次数。
+++4. 移除每个网络分块后的主动 `taskYIELD()`，改为每帧发送完成后让出一次任务。
+++5. JPEG 持久缓冲提高到 80 KB，降低质量 72 时因单帧过大而丢帧的概率。
+++6. 内部 RAM 保留量提高到 96 KB；连续内部 RAM 不足时自动把 JPEG 缓冲放入 PSRAM，避免挤压 Wi-Fi/TCP。
+++7. 开启 GC2145 的 BPC、WPC、Raw GMA、Lens Correction，并设置轻度锐化和对比度增强。这些属于传感器侧处理，几乎不增加 ESP32 每帧 CPU 开销。
+++8. 保留 V7 的 320×240、单缓冲、Start/Stop、固定 ROI、红色钢球框、旧连接释放和单视频流保护。
+++
+++## 可调参数
+++
+++文件：`CameraWebServer_MaxFPS/stream_profile.h`
+++
+++```cpp
+++#define SOFTWARE_JPEG_QUALITY 72
+++#define BALL_DETECT_EVERY_N_FRAMES 2
+++#define BALL_FULL_SCAN_EVERY_N_FRAMES 8
+++#define BALL_TRACK_SEARCH_RADIUS 42
+++```
+++
+++- 画质仍不够：将质量改为 75；不建议直接超过 80。
+++- 帧率仍低：先将质量恢复到 70，而不是降低分辨率。
+++- 钢球移动很快导致红框跟不上：将检测间隔改为 1，或搜索半径增大到 55。
+++- 钢球运动较慢且优先帧率：可将检测间隔改为 3。
+++
+++## 说明
+++
+++该版本已进行源码静态语法检查和 ZIP 完整性检查，但无法替代幻尔实物板上的实际帧率、画质和识别测试。质量 72 的实际提升取决于画面复杂度、光照、手机浏览器和供电稳定性。
