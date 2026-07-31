@@ -16,6 +16,7 @@ typedef enum
     TASK2_STATE_IDLE = 0,
     TASK2_STATE_LAP_RUNNING,
     TASK2_STATE_PREDECEL,
+    TASK2_STATE_POSITION_APPROACH,
     TASK2_STATE_DISTANCE_STOPPING,
     TASK2_STATE_USER_STOPPING,
     TASK2_STATE_FINISHED,
@@ -28,13 +29,15 @@ static uint32_t s_start_ms = 0U;
 static uint32_t s_last_report_ms = 0U;
 static uint32_t s_line_candidate_start_ms = 0U;
 static bool s_line_candidate = false;
+static uint8_t s_line_window_total = 0U;
+static uint8_t s_line_window_matched = 0U;
 static bool s_has_fresh_sensor_frame = false;
 static uint32_t s_last_sensor_sequence = 0U;
 static uint8_t s_last_sensor_valid_mask = 0U;
 static int32_t s_line_center_mm = 0;
+static int32_t s_stop_target_center_mm = 0;
 static int32_t s_stop_offset_mm = 0;
-static int32_t s_stop_decel_mm_s2 = 0;
-static int32_t s_stop_jerk_mm_s3 = 0;
+static int32_t s_position_speed_mm_s = 0;
 static uint32_t s_fault_detail = 0U;
 
 /*
@@ -87,97 +90,68 @@ static Task2LapStopResult_t Task2_Fault(uint32_t detail)
     return TASK2_LAP_STOP_RESULT_FAULT;
 }
 
-static int32_t Task2_GetForwardSpeedMmps(
-    const ChassisStatus_t *chassis,
-    const LineFollowControlStatus_t *control)
+static int32_t Task2_GetPositionProgressMm(
+    const DistanceTrackerStatus_t *distance)
 {
-    int32_t measured;
-    int32_t planned;
-    int32_t commanded;
-    int32_t speed;
+    int32_t progress_mm;
 
-    measured =
-        (Task2_AbsI32(chassis->left_measured_mm_s) +
-         Task2_AbsI32(chassis->right_measured_mm_s)) / 2;
-    planned = Task2_AbsI32(chassis->forward_target_mm_s);
-    commanded = Task2_AbsI32(control->base_speed_mm_s);
+    if ((s_state != TASK2_STATE_POSITION_APPROACH) &&
+        (s_state != TASK2_STATE_DISTANCE_STOPPING))
+    {
+        return 0;
+    }
 
-    speed = measured;
-    if (planned > speed)
+    progress_mm = distance->center_signed_mm - s_line_center_mm;
+
+    if (progress_mm < 0)
     {
-        speed = planned;
+        progress_mm = 0;
     }
-    if (commanded > speed)
-    {
-        speed = commanded;
-    }
-    return speed;
+    return progress_mm;
 }
 
-static void Task2_CalculateStopProfile(
-    int32_t speed_mm_s,
-    int32_t *decel_mm_s2,
-    int32_t *jerk_mm_s3)
+static int32_t Task2_GetPositionSpeedMmps(int32_t remaining_mm)
 {
-    uint32_t effective_distance_mm =
-        TASK2_SENSOR_FORWARD_OFFSET_MM -
-        TASK2_STOP_DISTANCE_MARGIN_MM;
-    int64_t denominator =
-        2LL * (int64_t)effective_distance_mm;
-    int64_t calculated_decel;
-    int64_t calculated_jerk;
+    int64_t speed =
+        ((int64_t)remaining_mm *
+         (int64_t)TASK2_POSITION_KP_Q10) >> 10;
 
-    calculated_decel =
-        ((int64_t)speed_mm_s * (int64_t)speed_mm_s +
-         denominator - 1LL) /
-        denominator;
-
-    *decel_mm_s2 = Task2_ClampI32(
-        (int32_t)calculated_decel,
-        TASK2_STOP_NOMINAL_DECEL_MM_S2,
-        TASK2_STOP_MAX_DECEL_MM_S2);
-
-    calculated_jerk =
-        (int64_t)(*decel_mm_s2) *
-        (int64_t)TASK2_STOP_JERK_MULTIPLIER;
-
-    *jerk_mm_s3 = Task2_ClampI32(
-        (int32_t)calculated_jerk,
-        TASK2_STOP_MIN_JERK_MM_S3,
-        TASK2_STOP_MAX_JERK_MM_S3);
+    return Task2_ClampI32(
+        (int32_t)speed,
+        TASK2_POSITION_MIN_SPEED_MM_S,
+        TASK2_POSITION_MAX_SPEED_MM_S);
 }
 
-static bool Task2_StartDistanceStop(
-    const DistanceTrackerStatus_t *distance,
-    const ChassisStatus_t *chassis,
-    const LineFollowControlStatus_t *control)
+static bool Task2_StartPositionApproach(
+    const DistanceTrackerStatus_t *distance)
 {
-    int32_t speed_mm_s =
-        Task2_GetForwardSpeedMmps(chassis, control);
-
-    Task2_CalculateStopProfile(
-        speed_mm_s,
-        &s_stop_decel_mm_s2,
-        &s_stop_jerk_mm_s3);
-
     s_line_center_mm = distance->center_signed_mm;
-    s_state = TASK2_STATE_DISTANCE_STOPPING;
+    s_stop_target_center_mm =
+        s_line_center_mm +
+        (int32_t)TASK2_SENSOR_FORWARD_OFFSET_MM;
+    s_stop_offset_mm = 0;
+    s_position_speed_mm_s =
+        TASK2_POSITION_MAX_SPEED_MM_S;
+
+    if (!LineFollowControl_SetBaseSpeedRangeMmps(
+            s_position_speed_mm_s,
+            s_position_speed_mm_s))
+    {
+        return false;
+    }
+
+    s_state = TASK2_STATE_POSITION_APPROACH;
 
     (void)BSP_Debug_Printf(
-        "T2,A_LINE=1,DIST=%lu,MASK=0x%02X,N=%u,C=%ld,V=%ld,DEC=%ld,JERK=%ld,DYN=%u\r\n",
+        "T2,A_LINE=1,DIST=%lu,MASK=0x%02X,N=%u,C=%ld,TARGET=%ld,HIT=%u/%u\r\n",
         (unsigned long)distance->traveled_mm,
         (unsigned int)s_line_result_snapshot.black_mask,
         (unsigned int)s_line_result_snapshot.black_count,
         (long)s_line_center_mm,
-        (long)speed_mm_s,
-        (long)s_stop_decel_mm_s2,
-        (long)s_stop_jerk_mm_s3,
-        (speed_mm_s > TASK2_PREDECEL_CENTER_SPEED_MM_S) ? 1U : 0U);
-
-    return LineFollowControl_RequestStopWithDecel(
-        LINE_FOLLOW_CONTROL_STOP_TASK_COMPLETE,
-        s_stop_decel_mm_s2,
-        s_stop_jerk_mm_s3);
+        (long)s_stop_target_center_mm,
+        (unsigned int)s_line_window_matched,
+        (unsigned int)s_line_window_total);
+    return true;
 }
 
 static void Task2_Report(
@@ -194,14 +168,15 @@ static void Task2_Report(
 
     s_last_report_ms = now_ms;
     (void)BSP_Debug_Printf(
-        "T2,ST=%u,MS=%lu,DIST=%lu,SDIST=%ld,MASK=0x%02X,B=%ld,DEC=%ld,OFF=%ld\r\n",
+        "T2,ST=%u,MS=%lu,DIST=%lu,SDIST=%ld,MASK=0x%02X,B=%ld,POS=%ld/%lu,OFF=%ld\r\n",
         (unsigned int)s_state,
         (unsigned long)(now_ms - s_start_ms),
         (unsigned long)distance->traveled_mm,
         (long)distance->center_signed_mm,
         (unsigned int)control->black_mask,
         (long)control->base_speed_mm_s,
-        (long)s_stop_decel_mm_s2,
+        (long)Task2_GetPositionProgressMm(distance),
+        (unsigned long)TASK2_SENSOR_FORWARD_OFFSET_MM,
         (long)s_stop_offset_mm);
 
     (void)BSP_Debug_Printf(
@@ -305,13 +280,15 @@ bool Task2LapStop_Start(uint32_t start_timestamp_ms)
     s_last_report_ms = start_timestamp_ms;
     s_line_candidate_start_ms = 0U;
     s_line_candidate = false;
+    s_line_window_total = 0U;
+    s_line_window_matched = 0U;
     s_has_fresh_sensor_frame = false;
     s_last_sensor_sequence = 0U;
     s_last_sensor_valid_mask = 0U;
     s_line_center_mm = 0;
+    s_stop_target_center_mm = 0;
     s_stop_offset_mm = 0;
-    s_stop_decel_mm_s2 = 0;
-    s_stop_jerk_mm_s3 = 0;
+    s_position_speed_mm_s = 0;
     s_fault_detail = 0U;
 
     (void)BSP_Debug_Printf(
@@ -383,10 +360,11 @@ Task2LapStopResult_t Task2LapStop_Update(uint32_t now_ms)
                     has_new_line_result = true;
                     parking_line_black =
                         ((s_line_result_snapshot.black_mask &
-                          TASK2_A_LINE_MIDDLE_MASK) ==
-                         TASK2_A_LINE_MIDDLE_MASK) &&
+                          TASK2_A_LINE_ADC345_MASK) ==
+                         TASK2_A_LINE_ADC345_MASK) ||
                         ((s_line_result_snapshot.black_mask &
-                          TASK2_A_LINE_SIDE_MASK) != 0U);
+                          TASK2_A_LINE_ADC456_MASK) ==
+                         TASK2_A_LINE_ADC456_MASK);
 
                     if (!LineFollowControl_Submit(
                             &s_line_result_snapshot) &&
@@ -464,6 +442,40 @@ Task2LapStopResult_t Task2LapStop_Update(uint32_t now_ms)
         return Task2_Fault(10U);
     }
 
+    if (s_state == TASK2_STATE_POSITION_APPROACH)
+    {
+        int32_t progress_mm =
+            Task2_GetPositionProgressMm(&s_distance_snapshot);
+        int32_t remaining_mm =
+            (int32_t)TASK2_SENSOR_FORWARD_OFFSET_MM -
+            progress_mm;
+
+        if (remaining_mm <= 0)
+        {
+            s_stop_offset_mm = progress_mm;
+            s_state = TASK2_STATE_DISTANCE_STOPPING;
+            (void)BSP_Debug_Printf(
+                "T2,POS_REACHED=1,C=%ld,TARGET=%ld,OFFSET=%ld,ERR=%ld\r\n",
+                (long)s_distance_snapshot.center_signed_mm,
+                (long)s_stop_target_center_mm,
+                (long)s_stop_offset_mm,
+                (long)(s_stop_offset_mm -
+                       (int32_t)TASK2_SENSOR_FORWARD_OFFSET_MM));
+            LineFollowControl_Stop(
+                LINE_FOLLOW_CONTROL_STOP_TASK_COMPLETE);
+            return TASK2_LAP_STOP_RESULT_RUNNING;
+        }
+
+        s_position_speed_mm_s =
+            Task2_GetPositionSpeedMmps(remaining_mm);
+        if (!LineFollowControl_SetBaseSpeedRangeMmps(
+                s_position_speed_mm_s,
+                s_position_speed_mm_s))
+        {
+            return Task2_Fault(12U);
+        }
+    }
+
     if ((s_state == TASK2_STATE_LAP_RUNNING) &&
         (s_distance_snapshot.traveled_mm >=
          TASK2_PREDECEL_DISTANCE_MM))
@@ -483,36 +495,73 @@ Task2LapStopResult_t Task2LapStop_Update(uint32_t now_ms)
     }
 
     if ((s_state == TASK2_STATE_PREDECEL) &&
-        has_new_line_result && parking_line_black)
+        has_new_line_result)
     {
         if (!s_line_candidate)
         {
-            s_line_candidate = true;
-            s_line_candidate_start_ms = now_ms;
-            (void)BSP_Debug_Printf(
-                "T2,A_CAND=1,DIST=%lu,MASK=0x%02X,N=%u\r\n",
-                (unsigned long)s_distance_snapshot.traveled_mm,
-                (unsigned int)s_line_result_snapshot.black_mask,
-                (unsigned int)s_line_result_snapshot.black_count);
-        }
-
-        if ((uint32_t)(now_ms - s_line_candidate_start_ms) >=
-            TASK2_A_LINE_CONFIRM_MS)
-        {
-            if (!Task2_StartDistanceStop(
-                    &s_distance_snapshot,
-                    &s_chassis_snapshot,
-                    &s_control_snapshot))
+            if (parking_line_black)
             {
-                return Task2_Fault(12U);
+                s_line_candidate = true;
+                s_line_candidate_start_ms = now_ms;
+                s_line_window_total = 1U;
+                s_line_window_matched = 1U;
+                (void)BSP_Debug_Printf(
+                    "T2,A_CAND=1,DIST=%lu,MASK=0x%02X,N=%u,WIN=%lu,PCT=%lu\r\n",
+                    (unsigned long)s_distance_snapshot.traveled_mm,
+                    (unsigned int)s_line_result_snapshot.black_mask,
+                    (unsigned int)s_line_result_snapshot.black_count,
+                    (unsigned long)TASK2_A_LINE_CONFIRM_MS,
+                    (unsigned long)TASK2_A_LINE_MATCH_PERCENT);
             }
         }
-    }
-    else if ((s_state == TASK2_STATE_PREDECEL) &&
-             has_new_line_result)
-    {
-        s_line_candidate = false;
-        s_line_candidate_start_ms = 0U;
+        else
+        {
+            if (s_line_window_total < UINT8_MAX)
+            {
+                s_line_window_total++;
+            }
+            if (parking_line_black &&
+                (s_line_window_matched < UINT8_MAX))
+            {
+                s_line_window_matched++;
+            }
+
+            if ((uint32_t)(now_ms - s_line_candidate_start_ms) >=
+                TASK2_A_LINE_CONFIRM_MS)
+            {
+                (void)BSP_Debug_Printf(
+                    "T2,A_WIN=1,HIT=%u/%u,OK=%u\r\n",
+                    (unsigned int)s_line_window_matched,
+                    (unsigned int)s_line_window_total,
+                    (((uint32_t)s_line_window_matched * 100U) >=
+                     ((uint32_t)s_line_window_total *
+                      TASK2_A_LINE_MATCH_PERCENT)) ? 1U : 0U);
+
+                if (((uint32_t)s_line_window_matched * 100U) >=
+                    ((uint32_t)s_line_window_total *
+                     TASK2_A_LINE_MATCH_PERCENT))
+                {
+                    if (!Task2_StartPositionApproach(
+                            &s_distance_snapshot))
+                    {
+                        return Task2_Fault(12U);
+                    }
+                }
+                else if (parking_line_black)
+                {
+                    s_line_candidate_start_ms = now_ms;
+                    s_line_window_total = 1U;
+                    s_line_window_matched = 1U;
+                }
+                else
+                {
+                    s_line_candidate = false;
+                    s_line_candidate_start_ms = 0U;
+                    s_line_window_total = 0U;
+                    s_line_window_matched = 0U;
+                }
+            }
+        }
     }
 
     return TASK2_LAP_STOP_RESULT_RUNNING;
@@ -538,6 +587,7 @@ bool Task2LapStop_RequestStop(void)
 
     if ((s_state != TASK2_STATE_LAP_RUNNING) &&
         (s_state != TASK2_STATE_PREDECEL) &&
+        (s_state != TASK2_STATE_POSITION_APPROACH) &&
         (s_state != TASK2_STATE_DISTANCE_STOPPING))
     {
         return false;
@@ -580,6 +630,8 @@ const char *Task2LapStop_GetPhaseText(void)
             return "T2 LAP RUN";
         case TASK2_STATE_PREDECEL:
             return "T2 FIND A LINE";
+        case TASK2_STATE_POSITION_APPROACH:
+            return "T2 POS 85MM";
         case TASK2_STATE_DISTANCE_STOPPING:
             return "T2 A STOPPING";
         case TASK2_STATE_USER_STOPPING:
