@@ -69,6 +69,22 @@ bool TaskMenuUi_TakeStopRequest(void);
  */
 void TaskMenuUi_SetFinished(void);
 
+/**
+ * @brief 显示任务结果和任务用时。
+ */
+/**
+ * @brief 更新任务3运行中的自动计时显示。
+ *
+ * 仅当十分之一秒发生变化时重绘OLED，避免无意义的I2C刷新。
+ */
+void TaskMenuUi_SetRunningElapsedMs(
+    uint32_t elapsed_ms,
+    bool timer_running);
+
+void TaskMenuUi_SetFinishedResult(
+    bool passed,
+    uint32_t elapsed_ms);
+
 TaskMenuTask_t TaskMenuUi_GetSelectedTask(void);
 TaskMenuState_t TaskMenuUi_GetState(void);
 bool TaskMenuUi_GetStatus(TaskMenuStatus_t *status);

@@ -1,4 +1,4 @@
-# CubeMX按键修正：KEY0=PE4，KEY_UP=PA0
+﻿# CubeMX按键修正：KEY0=PE4，KEY_UP=PA0
 
 适配基线：
 

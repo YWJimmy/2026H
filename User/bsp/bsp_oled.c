@@ -829,8 +829,7 @@ void BSP_Oled_SetPixel(uint8_t x, uint8_t y, bool on)
     }
     else
     {
-        s_framebuffer[page][x] &=
-            (uint8_t)(~(1U << bit));
+        s_framebuffer[page][x] &= (uint8_t)(~(1U << bit));
     }
 
     s_dirty_mask |= (uint8_t)(1U << page);

@@ -1,699 +1,721 @@
 #include "test_ball_balance.h"
 
-#include "ball_balance_control.h"
-#include "ball_balance_control_config.h"
 #include "bsp_debug_uart.h"
-#include "bsp_key.h"
-#include "bsp_oled.h"
-#include "stm32f4xx_hal.h"
-#include "task_menu_ui.h"
+#include "bsp_servo.h"
 #include "vision.h"
+#include "stm32f4xx_hal.h"
 
-#include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
+#include <stdlib.h>
 
 /*
- * ---------------------------------------------------------------------------
- * Local strategy / state definitions
- * ---------------------------------------------------------------------------
+ * Task 3 one-shot sequence:
+ *   O -> +5 cm -> -5 cm -> hold
+ *
+ * Coordinate calibration inherited from 0ebde21/7a35ce0:
+ *   O = 653, +5 cm = 869, -5 cm = 447.
+ * Pulse increase moves the ball toward larger cx.
  */
+#define BALL_TARGET_CX_O                 653
+#define BALL_TARGET_CX_P5                869
+#define BALL_TARGET_CX_N5                447
+
+/* Keep the proven 7a35ce0 neutral and travel pulse baseline. */
+#define SERVO_NEUTRAL_US                1650U
+#define SERVO_RIGHT_CRUISE_US           1750U
+#define SERVO_LEFT_CRUISE_US            1550U
+#define SERVO_TURN_BRAKE_US             1420U
+#define SERVO_MIN_US                    1300U
+#define SERVO_MAX_US                    2000U
+
+/* Time budget: the official motion must finish within 5 seconds. */
+#define BALL_RUN_LIMIT_MS               5000U
+#define BALL_CENTER_READY_MAX_MS         300U
+#define BALL_TURN_BRAKE_MAX_MS           450U
+
+/* Position/speed windows in camera pixels and pixels per valid frame. */
+#define BALL_CENTER_READY_ERR_PX          32
+#define BALL_CENTER_READY_SPEED_PX         3
+#define BALL_CENTER_READY_FRAMES           3U
+
+#define BALL_POS5_SWITCH_ERR_PX           30
+#define BALL_POS5_BRAKE_BASE_PX           38
+#define BALL_POS5_BRAKE_SPEED_GAIN         4
+
+#define BALL_NEG5_CAPTURE_ERR_PX          43
+#define BALL_NEG5_BRAKE_BASE_PX           70
+#define BALL_NEG5_BRAKE_SPEED_GAIN         4
+
+/* Final acceptance is evaluated in physical millimetres. */
+#define BALL_TARGET_N5_MM                 (-50)
+#define BALL_FINAL_TOLERANCE_MM             10
+#define BALL_FINAL_SPEED_PX                 2
+
+/* Final capture: brake velocity first, then correct position. */
+#define BALL_CAPTURE_BRAKE_BASE_US        120
+#define BALL_CAPTURE_BRAKE_SPEED_GAIN       7
+#define BALL_CAPTURE_BRAKE_MAX_US         285
+#define BALL_SETTLE_CORR_MIN_US            60
+#define BALL_SETTLE_CORR_MAX_US           140
+#define BALL_SETTLE_STUCK_WAIT              5U
+#define BALL_SETTLE_KICK_US                180
+#define BALL_SETTLE_KICK_FRAMES             3U
+
+/*
+ * PASS time is latched on the first valid stop, but the servo must remain in a
+ * low-amplitude closed loop afterwards. A fixed neutral pulse lets the ball
+ * drift on a slightly tilted rod, so the finished state learns a small static
+ * hold bias and damps any new motion without reopening the task result.
+ */
+#define BALL_FINISH_HOLD_INNER_MM             5
+#define BALL_FINISH_HOLD_BIAS_STEP_US          3
+#define BALL_FINISH_HOLD_BIAS_MAX_US          90
+#define BALL_FINISH_HOLD_POS_GAIN_US           3
+#define BALL_FINISH_HOLD_POS_MAX_US           36
+#define BALL_FINISH_HOLD_SPEED_GAIN_US         8
+#define BALL_FINISH_HOLD_SPEED_MAX_US         48
+#define BALL_FINISH_HOLD_TOTAL_MAX_US        110
+#define BALL_FINISH_HOLD_SLEW_US              18
+
+#define BALL_LOST_TIMEOUT_FRAMES           10U
+#define BALL_PRINT_PERIOD_MS               50U
+#define BALL_HEARTBEAT_MS                1000U
+
 typedef enum
 {
-    BALL_STRATEGY_AB_HOLD = 0,
-    BALL_STRATEGY_3PHASE,
-    BALL_STRATEGY_COUNT
-} BallTestStrategy_t;
+    BALL_STATE_WAIT_CENTER = 0,
+    BALL_STATE_TO_POS5,
+    BALL_STATE_TURN_BRAKE,
+    BALL_STATE_TO_NEG5,
+    BALL_STATE_SETTLE_NEG5,
+    BALL_STATE_FINISHED,
+    BALL_STATE_TIMEOUT
+} BallTaskState_t;
 
-typedef enum
-{
-    BALL_TEST_STATE_MENU = 0,
-    BALL_TEST_STATE_RUNNING
-} BallTestState_t;
-
-/*
- * ---------------------------------------------------------------------------
- * Timing constants
- * ---------------------------------------------------------------------------
- */
-#define TEST_BALL_BALANCE_PRINT_PERIOD_MS     ((uint32_t)50U)
-#define TEST_BALL_BALANCE_HEARTBEAT_MS        ((uint32_t)2000U)
-#define TEST_BALL_BALANCE_OLED_REFRESH_MS     ((uint32_t)200U)
-
-/*
- * ---------------------------------------------------------------------------
- * Global state
- * ---------------------------------------------------------------------------
- */
-static BallTestStrategy_t s_strategy =
-    BALL_STRATEGY_AB_HOLD;
-static BallTestState_t s_state =
-    BALL_TEST_STATE_MENU;
 static bool s_initialized = false;
 static bool s_vision_ok = false;
+static bool s_result_done = false;
+static bool s_result_passed = false;
 
-/*
- * ---------------------------------------------------------------------------
- * Timing trackers
- * ---------------------------------------------------------------------------
- */
+static BallTaskState_t s_state = BALL_STATE_WAIT_CENTER;
+static uint16_t s_target_cx = BALL_TARGET_CX_O;
+static uint16_t s_servo_pulse = SERVO_NEUTRAL_US;
+static const char *s_control_mode = "HOLD";
+
+static uint32_t s_task_start_ms = 0U;
+/* Automatic OLED timer starts at the actual O-point departure. */
+static uint32_t s_motion_start_ms = 0U;
+static bool s_motion_timer_started = false;
+static uint32_t s_state_start_ms = 0U;
+static uint32_t s_pos5_reached_ms = 0U;
+static uint32_t s_result_elapsed_ms = 0U;
 static uint32_t s_last_print_ms = 0U;
 static uint32_t s_last_heartbeat_ms = 0U;
-static uint32_t s_last_oled_ms = 0U;
+static uint32_t s_last_vision_sequence = 0U;
+static uint32_t s_lost_frames = 0U;
 
-/*
- * ---------------------------------------------------------------------------
- * Event / error tracking
- * ---------------------------------------------------------------------------
- */
-static uint32_t s_last_event_sequence = 0U;
-static uint32_t s_last_servo_error_count = 0U;
+static int32_t s_last_cx = 0;
+static int32_t s_last_x_mm = 0;
+static int32_t s_last_error_mm = 0;
+static int32_t s_prev_cx = 0;
+static int32_t s_raw_speed = 0;
+static int32_t s_speed = 0;
+static int32_t s_last_error = 0;
+static bool s_has_target = false;
 
-/*
- * ---------------------------------------------------------------------------
- * A-B hold cycle state
- * ---------------------------------------------------------------------------
- */
-static uint32_t s_target_hold_start_ms = 0U;
-static bool s_target_hold_active = false;
+static uint32_t s_center_ready_frames = 0U;
+static uint32_t s_turn_zero_frames = 0U;
+static uint32_t s_final_stable_frames = 0U;
+static uint32_t s_settle_stuck_frames = 0U;
+static uint32_t s_settle_kick_frames = 0U;
+static int32_t s_settle_kick_dir = 0;
+static int32_t s_finish_hold_bias_us = 0;
 
-/*
- * ---------------------------------------------------------------------------
- * 3-phase cycle state
- * ---------------------------------------------------------------------------
- */
-static uint8_t s_cycle_phase = 0U;
-static uint32_t s_cycle_start_ms = 0U;
-static const uint16_t s_cycle_targets[3] =
-    {
-        (uint16_t)BALL_BALANCE_TARGET_CX_0,
-        (uint16_t)BALL_BALANCE_TARGET_CX_P5,
-        (uint16_t)BALL_BALANCE_TARGET_CX_N5};
-static const uint8_t s_cycle_hold[3] = {1U, 0U, 1U};
-/*
- * Per-phase brake distance gain.
- * Phase 0: approach 0cm   — gain 10 (231 px approach from -5cm)
- * Phase 1: approach +5cm  — gain 10 (216 px approach from  0cm)
- * Phase 2: approach -5cm  — gain 15 (422 px long approach)
- */
-static const int32_t s_cycle_brake_gains[3] =
-    {
-        (int32_t)10,                            /* 10: Phase 0 */
-        (int32_t)10,                            /* 10: Phase 1 bounce approach */
-        (int32_t)15                             /* 15: Phase 2 long approach */
-    };
+static int32_t s_pos5_peak_cx = BALL_TARGET_CX_O;
+static int32_t s_neg5_min_cx = BALL_TARGET_CX_O;
 
-/*
- * ---------------------------------------------------------------------------
- * Cycle timer: 0cm departure → -5cm arrival
- * ---------------------------------------------------------------------------
- */
-typedef enum
-{
-    CYCLE_TIMER_IDLE = 0,
-    CYCLE_TIMER_RUNNING,
-    CYCLE_TIMER_DONE
-} CycleTimerState_t;
-
-static CycleTimerState_t s_timer_state = CYCLE_TIMER_IDLE;
-static uint32_t s_timer_start_ms = 0U;
-static uint32_t s_last_cycle_time_ms = 0U;
-static uint32_t s_cycle_count = 0U;
-static uint32_t s_cycle_phase_prev = 0U;
-
-/*
- * ---------------------------------------------------------------------------
- * 7-segment large digit layout (28 x 46 pixels per digit)
- * ---------------------------------------------------------------------------
- */
-#define LARGE_DIGIT_W       28U
-#define LARGE_DIGIT_H       46U
-#define LARGE_DIGIT_START_Y 9U
-
-/*
- * Compute start X to center N large items (digits + DP) on the screen.
- * Layout:  D0  D1  .  D2
- * Spacing:  4px  2px 2px
- */
-#define LARGE_DIGIT_COUNT   3U
-#define LARGE_DP_W          8U
-#define LARGE_DP_H          8U
-#define LARGE_GAP_DIGIT     4U
-#define LARGE_GAP_DP        2U
-
-#define LARGE_TOTAL_W \
-    ((LARGE_DIGIT_W * 3U) + (LARGE_GAP_DIGIT * 2U) + \
-     LARGE_DP_W + (LARGE_GAP_DP * 2U))
-#define LARGE_START_X \
-    ((BSP_OLED_WIDTH - LARGE_TOTAL_W) / 2U)
-
-/*
- * Segment geometry relative to digit origin (dx, dy).
- *   ---A---
- *  |       |
- *  F       B
- *  |       |
- *   ---G---
- *  |       |
- *  E       C
- *  |       |
- *   ---D---
- */
-typedef struct
-{
-    uint8_t x;
-    uint8_t y;
-    uint8_t w;
-    uint8_t h;
-} SegmentDef_t;
-
-static const SegmentDef_t SEG_A = {4U,  0U,  20U, 6U};
-static const SegmentDef_t SEG_B = {24U, 5U,  4U,  17U};
-static const SegmentDef_t SEG_C = {24U, 24U, 4U,  17U};
-static const SegmentDef_t SEG_D = {4U,  40U, 20U, 6U};
-static const SegmentDef_t SEG_E = {0U,  24U, 4U,  17U};
-static const SegmentDef_t SEG_F = {0U,  5U,  4U,  17U};
-static const SegmentDef_t SEG_G = {4U,  22U, 20U, 6U};
-
-/*
- * 7-segment truth table for digits 0-9.
- * Bit[0]=A, Bit[1]=B, Bit[2]=C, Bit[3]=D,
- * Bit[4]=E, Bit[5]=F, Bit[6]=G (1 = on).
- */
-static const uint8_t SEG_MAP[10] =
-{
-    0x3FU, /* 0: A B C D E F   */
-    0x06U, /* 1:     B C       */
-    0x5BU, /* 2: A B   D E   G */
-    0x4FU, /* 3: A B C D     G */
-    0x66U, /* 4:   B C   E F G */
-    0x6DU, /* 5: A   C D   F G */
-    0x7DU, /* 6: A   C D E F G */
-    0x07U, /* 7: A B C         */
-    0x7FU, /* 8: A B C D E F G */
-    0x6FU  /* 9: A B C D   F G */
-};
-
-static const SegmentDef_t * const SEG_TABLE[7] =
-{
-    &SEG_A, &SEG_B, &SEG_C, &SEG_D, &SEG_E, &SEG_F, &SEG_G
-};
-
-static void BallTest_DrawLargeSeg(
-    uint8_t dx,
-    uint8_t dy,
-    const SegmentDef_t *seg)
-{
-    BSP_Oled_FillRect(
-        (uint8_t)(dx + seg->x),
-        (uint8_t)(dy + seg->y),
-        seg->w,
-        seg->h,
-        true);
-}
-
-static void BallTest_DrawLargeDigit(
-    uint8_t digit,
-    uint8_t dx,
-    uint8_t dy)
-{
-    uint8_t mask;
-    uint8_t i;
-
-    if (digit > 9U)
-    {
-        return;
-    }
-
-    mask = SEG_MAP[digit];
-
-    for (i = 0U; i < 7U; i++)
-    {
-        if ((mask & (1U << i)) != 0U)
-        {
-            BallTest_DrawLargeSeg(
-                dx, dy, SEG_TABLE[i]);
-        }
-    }
-}
-
-static void BallTest_DrawLargeDP(
-    uint8_t dx,
-    uint8_t dy)
-{
-    /* Small filled square as decimal point. */
-    BSP_Oled_FillRect(
-        dx, (uint8_t)(dy + LARGE_DIGIT_H - LARGE_DP_H),
-        LARGE_DP_W, LARGE_DP_H, true);
-}
-
-/*
- * Draw the 3 large digits + decimal point.
- * Format: D0 D1 . D2   (e.g. "12.3" = 12.3 seconds)
- */
-static void BallTest_DrawLargeTime(
-    uint8_t d0,
-    uint8_t d1,
-    uint8_t d2)
-{
-    uint8_t x;
-
-    x = LARGE_START_X;
-
-    /* Digit 0 (tens of seconds). */
-    BallTest_DrawLargeDigit(d0, x, LARGE_DIGIT_START_Y);
-    x += (uint8_t)(LARGE_DIGIT_W + LARGE_GAP_DIGIT);
-
-    /* Digit 1 (ones of seconds). */
-    BallTest_DrawLargeDigit(d1, x, LARGE_DIGIT_START_Y);
-    x += (uint8_t)(LARGE_DIGIT_W + LARGE_GAP_DP);
-
-    /* Decimal point. */
-    BallTest_DrawLargeDP(x, LARGE_DIGIT_START_Y);
-    x += (uint8_t)(LARGE_DP_W + LARGE_GAP_DP);
-
-    /* Digit 2 (tenths of seconds). */
-    BallTest_DrawLargeDigit(d2, x, LARGE_DIGIT_START_Y);
-}
-
-/*
- * ---------------------------------------------------------------------------
- * Helpers
- * ---------------------------------------------------------------------------
- */
-static int32_t Test_BallBalance_AbsI32(int32_t value)
+static int32_t Ball_Abs32(int32_t value)
 {
     return (value < 0) ? -value : value;
 }
 
-static const char *BallStrategy_Name(
-    BallTestStrategy_t strategy)
+static int32_t Ball_Clamp32(int32_t value, int32_t minimum, int32_t maximum)
 {
-    switch (strategy)
+    if (value < minimum)
     {
-        case BALL_STRATEGY_AB_HOLD:
-            return "AB HOLD";
+        return minimum;
+    }
+    if (value > maximum)
+    {
+        return maximum;
+    }
+    return value;
+}
 
-        case BALL_STRATEGY_3PHASE:
-            return "3PHASE";
+static uint16_t Ball_ClampPulse(int32_t pulse)
+{
+    return (uint16_t)Ball_Clamp32(
+        pulse,
+        (int32_t)SERVO_MIN_US,
+        (int32_t)SERVO_MAX_US);
+}
 
+static const char *Ball_StateName(BallTaskState_t state)
+{
+    switch (state)
+    {
+        case BALL_STATE_WAIT_CENTER:
+            return "WAIT_O";
+        case BALL_STATE_TO_POS5:
+            return "TO_POS5";
+        case BALL_STATE_TURN_BRAKE:
+            return "TURN_BRAKE";
+        case BALL_STATE_TO_NEG5:
+            return "TO_NEG5";
+        case BALL_STATE_SETTLE_NEG5:
+            return "SETTLE_NEG5";
+        case BALL_STATE_FINISHED:
+            return "FINISHED";
+        case BALL_STATE_TIMEOUT:
         default:
-            return "?";
+            return "TIMEOUT";
     }
 }
 
-/*
- * Map ball strategy to the corresponding menu task.
- */
-static TaskMenuTask_t BallStrategy_ToMenuTask(
-    BallTestStrategy_t strategy)
+static void Ball_SetPulse(uint16_t pulse, const char *mode)
 {
-    switch (strategy)
+    pulse = Ball_ClampPulse((int32_t)pulse);
+    if (pulse != s_servo_pulse)
     {
-        case BALL_STRATEGY_AB_HOLD:
-            return TASK_MENU_TASK_4_AB_HOLD;
-
-        case BALL_STRATEGY_3PHASE:
-        default:
-            return TASK_MENU_TASK_3_BALL_SEQUENCE;
+        if (BSP_Servo_SetPulseUs(pulse))
+        {
+            s_servo_pulse = pulse;
+        }
     }
+    s_control_mode = mode;
 }
 
-/*
- * ---------------------------------------------------------------------------
- * OLED running screen
- * ---------------------------------------------------------------------------
- */
-static void BallTest_RenderRunning(void)
+static void Ball_SetPulseSigned(int32_t pulse, const char *mode)
 {
-    BallBalanceControlStatus_t control;
-    char line[32];
+    Ball_SetPulse(Ball_ClampPulse(pulse), mode);
+}
 
-    if (!BallBalanceControl_GetStatus(&control))
+static void Ball_SlewPulse(int32_t target_pulse, int32_t step_us, const char *mode)
+{
+    int32_t current = (int32_t)s_servo_pulse;
+    int32_t delta = target_pulse - current;
+
+    if (delta > step_us)
+    {
+        target_pulse = current + step_us;
+    }
+    else if (delta < -step_us)
+    {
+        target_pulse = current - step_us;
+    }
+
+    Ball_SetPulseSigned(target_pulse, mode);
+}
+
+static void Ball_ResetSettleCounters(void)
+{
+    s_final_stable_frames = 0U;
+    s_settle_stuck_frames = 0U;
+    s_settle_kick_frames = 0U;
+    s_settle_kick_dir = 0;
+}
+
+static void Ball_EnterState(BallTaskState_t state, uint32_t now_ms)
+{
+    s_state = state;
+    s_state_start_ms = now_ms;
+    s_turn_zero_frames = 0U;
+
+    if (state == BALL_STATE_TO_POS5)
+    {
+        s_target_cx = BALL_TARGET_CX_P5;
+        s_pos5_peak_cx = s_last_cx;
+    }
+    else if ((state == BALL_STATE_TURN_BRAKE) ||
+             (state == BALL_STATE_TO_NEG5) ||
+             (state == BALL_STATE_SETTLE_NEG5) ||
+             (state == BALL_STATE_FINISHED))
+    {
+        s_target_cx = BALL_TARGET_CX_N5;
+        if (state == BALL_STATE_SETTLE_NEG5)
+        {
+            Ball_ResetSettleCounters();
+        }
+    }
+    else
+    {
+        s_target_cx = BALL_TARGET_CX_O;
+    }
+
+    s_last_error = (int32_t)s_target_cx - s_last_cx;
+
+    (void)BSP_Debug_Printf(
+        "BALL_BAL,STATE_CHANGE,STATE=%s,TARGET=%u,CX=%ld,SPD=%+ld,T=%lums\r\n",
+        Ball_StateName(state),
+        (unsigned int)s_target_cx,
+        (long)s_last_cx,
+        (long)s_speed,
+        (unsigned long)(now_ms - s_task_start_ms));
+}
+
+static uint32_t Ball_GetMotionElapsedMs(uint32_t now_ms)
+{
+    if (!s_motion_timer_started)
+    {
+        return 0U;
+    }
+
+    return (uint32_t)(now_ms - s_motion_start_ms);
+}
+
+static void Ball_ReportResult(bool passed, const char *reason, uint32_t now_ms)
+{
+    int32_t pos5_overshoot_px;
+    int32_t neg5_overshoot_px;
+
+    if (s_result_done)
     {
         return;
     }
 
-    BSP_Oled_Clear();
+    s_result_done = true;
+    s_result_passed = passed;
+    s_result_elapsed_ms = Ball_GetMotionElapsedMs(now_ms);
 
-    if (s_strategy == BALL_STRATEGY_3PHASE)
+    pos5_overshoot_px = s_pos5_peak_cx - BALL_TARGET_CX_P5;
+    if (pos5_overshoot_px < 0)
     {
-        uint32_t elapsed_ms;
-        uint32_t display_ms;
-        uint8_t  d0, d1, d2;  /* tens, ones, tenths */
-
-        /*
-         * Compute display time.
-         * DONE  → frozen last-cycle time.
-         * IDLE  → 0.0 (waiting for start).
-         * RUN   → live elapsed since departure.
-         */
-        if (s_timer_state == CYCLE_TIMER_DONE)
-        {
-            display_ms = s_last_cycle_time_ms;
-        }
-        else if (s_timer_state == CYCLE_TIMER_RUNNING)
-        {
-            elapsed_ms =
-                (uint32_t)(HAL_GetTick() - s_timer_start_ms);
-            display_ms = elapsed_ms;
-        }
-        else
-        {
-            display_ms = 0U;
-        }
-
-        /*
-         * Convert ms to seconds × 10.
-         * e.g. 12345 ms → 123 tenths → 12.3 sec
-         */
-        {
-            uint32_t tenths = display_ms / 100U;
-            uint32_t sec    = tenths / 10U;
-
-            d0 = (uint8_t)((sec / 10U) % 10U);   /* tens  */
-            d1 = (uint8_t)(sec % 10U);            /* ones  */
-            d2 = (uint8_t)(tenths % 10U);         /* tenth */
-        }
-
-        /* Draw the three large digits. */
-        BallTest_DrawLargeTime(d0, d1, d2);
-
-        /* Top-left corner: cycle count. */
-        (void)snprintf(line, sizeof(line),
-            "#%lu",
-            (unsigned long)s_cycle_count);
-        BSP_Oled_DrawString(0U, 0U, line);
-
-        /* Top-right: state indicator. */
-        if (s_timer_state == CYCLE_TIMER_RUNNING)
-        {
-            BSP_Oled_DrawString(100U, 0U, "RUN");
-        }
-        else if (s_timer_state == CYCLE_TIMER_DONE)
-        {
-            BSP_Oled_DrawString(100U, 0U, "DONE");
-        }
-        else
-        {
-            BSP_Oled_DrawString(100U, 0U, "RDY");
-        }
-
-        /* Bottom: stop hint. */
-        BSP_Oled_DrawString(36U, 7U, "K0 STOP");
-    }
-    else
-    {
-        /* Original detail display for A-B HOLD strategy. */
-        (void)snprintf(line, sizeof(line),
-            "A-B HOLD");
-        BSP_Oled_DrawString(0U, 0U, line);
-
-        (void)snprintf(line, sizeof(line),
-            "CX=%-5ld T=%-5ld",
-            (long)control.center_x,
-            (long)control.target_x);
-        BSP_Oled_DrawString(0U, 2U, line);
-
-        (void)snprintf(line, sizeof(line),
-            "E=%-4ld S=%-4ld %s",
-            (long)control.error,
-            (long)control.speed,
-            BallBalanceControl_ModeName(control.mode));
-        BSP_Oled_DrawString(0U, 4U, line);
-
-        (void)snprintf(line, sizeof(line),
-            "PLS=%-4u K0:STOP",
-            (unsigned int)control.servo_pulse_us);
-        BSP_Oled_DrawString(0U, 6U, line);
-    }
-}
-
-/*
- * ---------------------------------------------------------------------------
- * A-B hold cycle (original HEAD logic, renamed)
- * ---------------------------------------------------------------------------
- */
-static bool Test_BallBalance_UpdateTargetCycle_AB(
-    const BallBalanceControlStatus_t *control,
-    uint32_t now_ms)
-{
-    int32_t next_target;
-
-    if ((control == NULL) ||
-        !control->has_target ||
-        !control->vision_data_valid ||
-        (Test_BallBalance_AbsI32(control->error) >
-         BALL_BALANCE_DEADZONE_PX))
-    {
-        s_target_hold_active = false;
-        return true;
+        pos5_overshoot_px = 0;
     }
 
-    if (!s_target_hold_active)
+    neg5_overshoot_px = BALL_TARGET_CX_N5 - s_neg5_min_cx;
+    if (neg5_overshoot_px < 0)
     {
-        s_target_hold_start_ms = now_ms;
-        s_target_hold_active = true;
-        return true;
-    }
-
-    if ((uint32_t)(now_ms - s_target_hold_start_ms) <
-        BALL_BALANCE_TARGET_HOLD_MS)
-    {
-        return true;
-    }
-
-    next_target = (control->target_x == BALL_BALANCE_TARGET_CX_A)
-        ? BALL_BALANCE_TARGET_CX_B
-        : BALL_BALANCE_TARGET_CX_A;
-
-    s_target_hold_active = false;
-
-    if (!BallBalanceControl_SetTargetX(next_target))
-    {
-        return false;
+        neg5_overshoot_px = 0;
     }
 
     (void)BSP_Debug_Printf(
-        "BALL_BAL,CYCLE,NEW_TARGET=%ld\r\n",
-        (long)next_target);
-    return true;
+        "BALL_BAL,RESULT=%s,REASON=%s,TOTAL_MS=%lu,POS5_MS=%lu,"
+        "FINAL_CX=%ld,FINAL_ERR_PX=%ld,FINAL_X_MM=%ld,FINAL_ERR_MM=%ld,"
+        "FINAL_SPD=%ld,"
+        "POS5_OVER_PX=%ld,NEG5_OVER_PX=%ld,PULSE=%u\r\n",
+        passed ? "PASS" : "FAIL",
+        reason,
+        (unsigned long)s_result_elapsed_ms,
+        (unsigned long)s_pos5_reached_ms,
+        (long)s_last_cx,
+        (long)s_last_error,
+        (long)s_last_x_mm,
+        (long)s_last_error_mm,
+        (long)s_speed,
+        (long)pos5_overshoot_px,
+        (long)neg5_overshoot_px,
+        (unsigned int)s_servo_pulse);
 }
 
-/*
- * ---------------------------------------------------------------------------
- * 3-phase cycle (from 7a35ce0, adapted to BallBalanceControl module)
- *
- * Phase 0: 0cm  (653), hold 5s  -> Phase 1
- * Phase 1: +5cm (869), bounce    -> Phase 2  (immediate switch)
- * Phase 2: -5cm (447), hold 5s  -> Phase 0
- * ---------------------------------------------------------------------------
- */
-static bool Test_BallBalance_UpdateTargetCycle_3Phase(
-    const BallBalanceControlStatus_t *control,
-    uint32_t now_ms)
+static void Ball_ControlWaitCenter(uint32_t now_ms)
 {
-    bool do_switch;
+    int32_t correction;
 
-    if ((control == NULL) ||
-        !control->has_target ||
-        !control->vision_data_valid)
+    if ((Ball_Abs32(s_last_error) <= BALL_CENTER_READY_ERR_PX) &&
+        (Ball_Abs32(s_speed) <= BALL_CENTER_READY_SPEED_PX))
     {
-        s_cycle_start_ms = 0U;
-        return true;
-    }
-
-    /*
-     * Only cycle when the ball is inside the dead zone.
-     */
-    if (Test_BallBalance_AbsI32(control->error) >
-        BALL_BALANCE_DEADZONE_PX)
-    {
-        s_cycle_start_ms = 0U;
-        return true;
-    }
-
-    do_switch = false;
-
-    if (s_cycle_hold[s_cycle_phase] == 0U)
-    {
-        /* Bounce phase: switch immediately. */
-        do_switch = true;
+        Ball_SetPulse(SERVO_NEUTRAL_US, "CENTER_READY");
+        s_center_ready_frames++;
     }
     else
     {
-        /* Hold phase: wait BALL_BALANCE_CYCLE_HOLD_MS. */
-        if (s_cycle_start_ms == 0U)
-        {
-            s_cycle_start_ms = now_ms;
-        }
-        else if ((uint32_t)(now_ms - s_cycle_start_ms) >=
-                 BALL_BALANCE_CYCLE_HOLD_MS)
-        {
-            do_switch = true;
-        }
+        correction = s_last_error - (s_speed * 3);
+        correction = Ball_Clamp32(correction, -100, 100);
+        Ball_SetPulseSigned((int32_t)SERVO_NEUTRAL_US + correction, "CENTERING");
+        s_center_ready_frames = 0U;
     }
 
-    if (!do_switch)
+    if ((s_center_ready_frames >= BALL_CENTER_READY_FRAMES) ||
+        ((uint32_t)(now_ms - s_task_start_ms) >= BALL_CENTER_READY_MAX_MS))
     {
-        return true;
+        /*
+         * Match bf89793 timing semantics: start automatically when the ball
+         * actually leaves O for +5 cm, not when KEY0 was pressed.
+         */
+        if (!s_motion_timer_started)
+        {
+            s_motion_start_ms = now_ms;
+            s_motion_timer_started = true;
+            (void)BSP_Debug_Printf(
+                "BALL_BAL,TIMER,START,AT=O_DEPARTURE\r\n");
+        }
+
+        Ball_EnterState(BALL_STATE_TO_POS5, now_ms);
+        Ball_SetPulse(SERVO_RIGHT_CRUISE_US, "RIGHT_CRUISE");
     }
-
-    /* Advance to next phase. */
-    s_cycle_start_ms = 0U;
-    s_cycle_phase = (s_cycle_phase + 1U) % 3U;
-
-    /*
-     * Set per-phase brake gain.
-     * Phase 0: 5, Phase 1: 8, Phase 2: 12.
-     */
-    (void)BallBalanceControl_SetBrakeGain(
-        s_cycle_brake_gains[s_cycle_phase]);
-
-    if (!BallBalanceControl_SetTargetX(
-            (int32_t)s_cycle_targets[s_cycle_phase]))
-    {
-        return false;
-    }
-
-    (void)BSP_Debug_Printf(
-        "BALL_BAL,CYCLE,PHASE=%u,HOLD=%u,TARGET=%u,"
-        "BRAKE_GAIN=%ld\r\n",
-        (unsigned int)s_cycle_phase,
-        (unsigned int)s_cycle_hold[s_cycle_phase],
-        (unsigned int)s_cycle_targets[s_cycle_phase],
-        (long)BallBalanceControl_GetBrakeGain());
-    return true;
 }
 
-/*
- * ---------------------------------------------------------------------------
- * Strategy dispatcher
- * ---------------------------------------------------------------------------
- */
-static bool Test_BallBalance_UpdateTargetCycle(
-    const BallBalanceControlStatus_t *control,
-    uint32_t now_ms)
+static void Ball_ControlToPos5(uint32_t now_ms)
 {
-    if (s_strategy == BALL_STRATEGY_3PHASE)
+    int32_t distance;
+    int32_t brake_distance;
+    int32_t brake_offset;
+
+    if (s_last_cx > s_pos5_peak_cx)
     {
-        return Test_BallBalance_UpdateTargetCycle_3Phase(
-            control,
-            now_ms);
+        s_pos5_peak_cx = s_last_cx;
     }
 
-    return Test_BallBalance_UpdateTargetCycle_AB(
-        control,
-        now_ms);
-}
+    distance = (int32_t)BALL_TARGET_CX_P5 - s_last_cx;
 
-/*
- * ---------------------------------------------------------------------------
- * Event printer (unchanged from HEAD)
- * ---------------------------------------------------------------------------
- */
-static void Test_BallBalance_PrintEvent(
-    const BallBalanceControlStatus_t *control)
-{
-    if ((control == NULL) ||
-        (control->event_sequence == s_last_event_sequence))
+    /* Arrive within about 7 mm, then immediately command a real reversal. */
+    if (distance <= BALL_POS5_SWITCH_ERR_PX)
     {
+        s_pos5_reached_ms = Ball_GetMotionElapsedMs(now_ms);
+        Ball_EnterState(BALL_STATE_TURN_BRAKE, now_ms);
+        Ball_SetPulse(SERVO_TURN_BRAKE_US, "TURN_HARD_BRAKE");
         return;
     }
 
-    s_last_event_sequence = control->event_sequence;
+    brake_distance = BALL_POS5_BRAKE_BASE_PX +
+        (Ball_Abs32(s_speed) * BALL_POS5_BRAKE_SPEED_GAIN);
 
-    (void)BSP_Debug_Printf(
-        "BALL_BAL,EVENT=%s,PULSE=%u,SEQ=%lu\r\n",
-        BallBalanceControl_EventName(control->last_event),
-        (unsigned int)control->servo_pulse_us,
-        (unsigned long)control->event_sequence);
+    if ((s_speed > 0) && (distance <= brake_distance))
+    {
+        brake_offset = 90 + (Ball_Abs32(s_speed) * 5);
+        brake_offset = Ball_Clamp32(brake_offset, 90, 250);
+        Ball_SetPulseSigned(
+            (int32_t)SERVO_NEUTRAL_US - brake_offset,
+            "POS5_BRAKE");
+    }
+    else
+    {
+        Ball_SetPulse(SERVO_RIGHT_CRUISE_US, "RIGHT_CRUISE");
+    }
 }
 
-/*
- * ---------------------------------------------------------------------------
- * Reset cycle state for a fresh strategy start
- * ---------------------------------------------------------------------------
- */
-static void BallTest_ResetStrategy(void)
+static void Ball_ControlTurnBrake(uint32_t now_ms)
 {
-    s_target_hold_active = false;
-    s_target_hold_start_ms = 0U;
+    if (s_last_cx > s_pos5_peak_cx)
+    {
+        s_pos5_peak_cx = s_last_cx;
+    }
 
-    s_cycle_phase = 0U;
-    s_cycle_start_ms = 0U;
-    s_cycle_phase_prev = 0U;
+    Ball_SetPulse(SERVO_TURN_BRAKE_US, "TURN_HARD_BRAKE");
 
-    s_timer_state = CYCLE_TIMER_IDLE;
-    s_timer_start_ms = 0U;
-    s_last_cycle_time_ms = 0U;
-    s_cycle_count = 0U;
+    if (s_speed <= 0)
+    {
+        s_turn_zero_frames++;
+    }
+    else
+    {
+        s_turn_zero_frames = 0U;
+    }
 
-    /* Default brake gain. */
-    (void)BallBalanceControl_SetBrakeGain(
-        BALL_BALANCE_BRAKE_DISTANCE_GAIN);
+    if ((s_turn_zero_frames >= 2U) ||
+        ((uint32_t)(now_ms - s_state_start_ms) >= BALL_TURN_BRAKE_MAX_MS))
+    {
+        Ball_EnterState(BALL_STATE_TO_NEG5, now_ms);
+        Ball_SetPulse(SERVO_LEFT_CRUISE_US, "LEFT_CRUISE");
+    }
 }
 
-/*
- * ---------------------------------------------------------------------------
- * Public API
- * ---------------------------------------------------------------------------
- */
+static void Ball_ControlToNeg5(uint32_t now_ms)
+{
+    int32_t distance;
+    int32_t brake_distance;
+    int32_t brake_offset;
+
+    if (s_last_cx < s_neg5_min_cx)
+    {
+        s_neg5_min_cx = s_last_cx;
+    }
+
+    distance = s_last_cx - (int32_t)BALL_TARGET_CX_N5;
+
+    if ((Ball_Abs32(s_last_error) <= BALL_NEG5_CAPTURE_ERR_PX) ||
+        (s_last_cx <= BALL_TARGET_CX_N5))
+    {
+        Ball_EnterState(BALL_STATE_SETTLE_NEG5, now_ms);
+        return;
+    }
+
+    /* If the ball still travels right after +5, brake it left immediately. */
+    if (s_speed > 2)
+    {
+        Ball_SetPulse(SERVO_TURN_BRAKE_US, "TURN_HARD_BRAKE");
+        return;
+    }
+
+    brake_distance = BALL_NEG5_BRAKE_BASE_PX +
+        (Ball_Abs32(s_speed) * BALL_NEG5_BRAKE_SPEED_GAIN);
+
+    if ((s_speed < 0) && (distance <= brake_distance))
+    {
+        brake_offset = 105 + (Ball_Abs32(s_speed) * 5);
+        brake_offset = Ball_Clamp32(brake_offset, 105, 270);
+        Ball_SetPulseSigned(
+            (int32_t)SERVO_NEUTRAL_US + brake_offset,
+            "NEG5_PREDICT_BRAKE");
+    }
+    else
+    {
+        Ball_SetPulse(SERVO_LEFT_CRUISE_US, "LEFT_CRUISE");
+    }
+}
+
+static void Ball_ControlFinishedAntiDrift(void)
+{
+    int32_t motion_speed;
+    int32_t position_correction = 0;
+    int32_t speed_correction;
+    int32_t total_correction;
+    int32_t target_pulse;
+
+    /* Use the larger speed estimate so a fresh drift is opposed immediately. */
+    motion_speed = (Ball_Abs32(s_raw_speed) > Ball_Abs32(s_speed))
+        ? s_raw_speed
+        : s_speed;
+
+    if (motion_speed > 1)
+    {
+        /* cx/x_mm is increasing: tilt left by reducing pulse. */
+        s_finish_hold_bias_us -= BALL_FINISH_HOLD_BIAS_STEP_US;
+    }
+    else if (motion_speed < -1)
+    {
+        /* cx/x_mm is decreasing: tilt right by increasing pulse. */
+        s_finish_hold_bias_us += BALL_FINISH_HOLD_BIAS_STEP_US;
+    }
+    else if (s_last_error_mm < -BALL_FINISH_HOLD_INNER_MM)
+    {
+        s_finish_hold_bias_us -= 1;
+    }
+    else if (s_last_error_mm > BALL_FINISH_HOLD_INNER_MM)
+    {
+        s_finish_hold_bias_us += 1;
+    }
+
+    s_finish_hold_bias_us = Ball_Clamp32(
+        s_finish_hold_bias_us,
+        -BALL_FINISH_HOLD_BIAS_MAX_US,
+        BALL_FINISH_HOLD_BIAS_MAX_US);
+
+    if (Ball_Abs32(s_last_error_mm) > BALL_FINISH_HOLD_INNER_MM)
+    {
+        position_correction = Ball_Clamp32(
+            s_last_error_mm * BALL_FINISH_HOLD_POS_GAIN_US,
+            -BALL_FINISH_HOLD_POS_MAX_US,
+            BALL_FINISH_HOLD_POS_MAX_US);
+    }
+
+    if (Ball_Abs32(motion_speed) <= 1)
+    {
+        speed_correction = 0;
+    }
+    else
+    {
+        speed_correction = Ball_Clamp32(
+            -motion_speed * BALL_FINISH_HOLD_SPEED_GAIN_US,
+            -BALL_FINISH_HOLD_SPEED_MAX_US,
+            BALL_FINISH_HOLD_SPEED_MAX_US);
+    }
+
+    total_correction = Ball_Clamp32(
+        s_finish_hold_bias_us + position_correction + speed_correction,
+        -BALL_FINISH_HOLD_TOTAL_MAX_US,
+        BALL_FINISH_HOLD_TOTAL_MAX_US);
+
+    target_pulse = (int32_t)SERVO_NEUTRAL_US + total_correction;
+    Ball_SlewPulse(
+        target_pulse,
+        BALL_FINISH_HOLD_SLEW_US,
+        "FINISHED_ANTI_DRIFT");
+}
+
+static void Ball_ControlFinalHold(bool allow_finish, uint32_t now_ms)
+{
+    int32_t error_abs;
+    int32_t speed_abs;
+    int32_t motion_speed;
+    int32_t motion_speed_abs;
+    int32_t brake_offset;
+    int32_t correction;
+    int32_t direction;
+
+    if (s_last_cx < s_neg5_min_cx)
+    {
+        s_neg5_min_cx = s_last_cx;
+    }
+
+    error_abs = Ball_Abs32(s_last_error);
+    speed_abs = Ball_Abs32(s_speed);
+    motion_speed = (Ball_Abs32(s_raw_speed) > speed_abs)
+        ? s_raw_speed
+        : s_speed;
+    motion_speed_abs = Ball_Abs32(motion_speed);
+
+    /* First remove kinetic energy. Never go neutral while crossing fast. */
+    if (motion_speed_abs > BALL_FINAL_SPEED_PX)
+    {
+        brake_offset = BALL_CAPTURE_BRAKE_BASE_US +
+            (motion_speed_abs * BALL_CAPTURE_BRAKE_SPEED_GAIN);
+        brake_offset = Ball_Clamp32(
+            brake_offset,
+            BALL_CAPTURE_BRAKE_BASE_US,
+            BALL_CAPTURE_BRAKE_MAX_US);
+
+        if (motion_speed < 0)
+        {
+            Ball_SetPulseSigned(
+                (int32_t)SERVO_NEUTRAL_US + brake_offset,
+                "CAPTURE_BRAKE_RIGHT");
+        }
+        else
+        {
+            Ball_SetPulseSigned(
+                (int32_t)SERVO_NEUTRAL_US - brake_offset,
+                "CAPTURE_BRAKE_LEFT");
+        }
+
+        s_final_stable_frames = 0U;
+        s_settle_stuck_frames = 0U;
+        s_settle_kick_frames = 0U;
+        return;
+    }
+
+    if (Ball_Abs32(s_last_error_mm) <= BALL_FINAL_TOLERANCE_MM)
+    {
+        /*
+         * Competition rule: +/-1 cm is acceptable. The first time the ball
+         * has actually stopped inside that window, finish immediately.
+         * Require both raw and filtered speed to be small so a single repeated
+         * camera coordinate cannot falsely declare a fast crossing as stopped.
+         */
+        Ball_SetPulse(SERVO_NEUTRAL_US, "FINAL_WINDOW");
+        s_settle_stuck_frames = 0U;
+        s_settle_kick_frames = 0U;
+
+        if (allow_finish &&
+            (speed_abs <= BALL_FINAL_SPEED_PX) &&
+            (Ball_Abs32(s_raw_speed) <= BALL_FINAL_SPEED_PX))
+        {
+            s_final_stable_frames = 1U;
+            s_finish_hold_bias_us = Ball_Clamp32(
+                s_last_error_mm * 2,
+                -30,
+                30);
+            Ball_EnterState(BALL_STATE_FINISHED, now_ms);
+            Ball_SetPulseSigned(
+                (int32_t)SERVO_NEUTRAL_US + s_finish_hold_bias_us,
+                "FINAL_HOLD_BIAS");
+            Ball_ReportResult(true, "FIRST_STOP_WITH_ANTI_DRIFT_HOLD", now_ms);
+        }
+        return;
+    }
+
+    s_final_stable_frames = 0U;
+    direction = (s_last_error > 0) ? 1 : -1;
+
+    if (s_settle_kick_frames > 0U)
+    {
+        s_settle_kick_frames--;
+        Ball_SetPulseSigned(
+            (int32_t)SERVO_NEUTRAL_US +
+                (s_settle_kick_dir * BALL_SETTLE_KICK_US),
+            "SETTLE_KICK");
+        return;
+    }
+
+    correction = (error_abs * 3) / 2;
+    correction = Ball_Clamp32(
+        correction,
+        BALL_SETTLE_CORR_MIN_US,
+        BALL_SETTLE_CORR_MAX_US);
+
+    Ball_SetPulseSigned(
+        (int32_t)SERVO_NEUTRAL_US + (direction * correction),
+        "SETTLE_CORRECT");
+
+    if (speed_abs <= 1)
+    {
+        s_settle_stuck_frames++;
+        if (s_settle_stuck_frames >= BALL_SETTLE_STUCK_WAIT)
+        {
+            s_settle_stuck_frames = 0U;
+            s_settle_kick_dir = direction;
+            s_settle_kick_frames = BALL_SETTLE_KICK_FRAMES;
+            Ball_SetPulseSigned(
+                (int32_t)SERVO_NEUTRAL_US +
+                    (direction * BALL_SETTLE_KICK_US),
+                "SETTLE_KICK");
+        }
+    }
+    else
+    {
+        s_settle_stuck_frames = 0U;
+    }
+}
+
 bool Test_BallBalance_Init(void)
 {
-    BallBalanceControlStatus_t control;
     uint32_t now_ms;
 
     s_initialized = false;
     s_vision_ok = false;
-    s_strategy = BALL_STRATEGY_AB_HOLD;
-    s_state = BALL_TEST_STATE_MENU;
-    s_last_event_sequence = 0U;
-    s_last_servo_error_count = 0U;
-    s_last_print_ms = 0U;
-    s_last_heartbeat_ms = 0U;
-    s_last_oled_ms = 0U;
+    s_result_done = false;
+    s_result_passed = false;
+    s_state = BALL_STATE_WAIT_CENTER;
+    s_target_cx = BALL_TARGET_CX_O;
+    s_servo_pulse = SERVO_NEUTRAL_US;
+    s_control_mode = "HOLD";
 
-    BallTest_ResetStrategy();
+    s_last_vision_sequence = 0U;
+    s_lost_frames = 0U;
+    s_last_cx = 0;
+    s_last_x_mm = 0;
+    s_last_error_mm = 0;
+    s_prev_cx = 0;
+    s_raw_speed = 0;
+    s_speed = 0;
+    s_last_error = 0;
+    s_has_target = false;
+
+    s_center_ready_frames = 0U;
+    s_turn_zero_frames = 0U;
+    Ball_ResetSettleCounters();
+    s_pos5_peak_cx = BALL_TARGET_CX_O;
+    s_neg5_min_cx = BALL_TARGET_CX_O;
+    s_pos5_reached_ms = 0U;
+    s_result_elapsed_ms = 0U;
+    s_motion_start_ms = 0U;
+    s_motion_timer_started = false;
+    s_finish_hold_bias_us = 0;
 
     if (!BSP_DebugUart_Init())
     {
         return false;
     }
 
-    (void)BSP_Debug_Printf(
-        "BALL_BAL,START,ARCH=BSP_MODULE,"
-        "TARGETS=%ld/%ld,HOLD_MS=%lu,DEADZONE=%ld,KP_Q10=%ld,"
-        "BRAKE_GAIN=%ld,BRAKE_BASE=%ld,BRAKE_MAX=%ld,"
-        "LIMS=PUSH_%u_%u_BRAKE_%u_%u,"
-        "STUCK=%ld/%lu,"
-        "3PHASE_T0=%ld,TP5=%ld,TN5=%ld,"
-        "BRAKE_P0=%ld,P1=%ld,P2=%ld\r\n",
-        (long)BALL_BALANCE_TARGET_CX_A,
-        (long)BALL_BALANCE_TARGET_CX_B,
-        (unsigned long)BALL_BALANCE_TARGET_HOLD_MS,
-        (long)BALL_BALANCE_DEADZONE_PX,
-        (long)BALL_BALANCE_PUSH_KP_Q10,
-        (long)BALL_BALANCE_BRAKE_DISTANCE_GAIN,
-        (long)BALL_BALANCE_BRAKE_BASE_US,
-        (long)BALL_BALANCE_BRAKE_MAX_US,
-        (unsigned int)BALL_BALANCE_SERVO_PUSH_MIN_US,
-        (unsigned int)BALL_BALANCE_SERVO_PUSH_MAX_US,
-        (unsigned int)BALL_BALANCE_SERVO_BRAKE_MIN_US,
-        (unsigned int)BALL_BALANCE_SERVO_BRAKE_MAX_US,
-        (long)BALL_BALANCE_STUCK_SPEED_PX,
-        (unsigned long)BALL_BALANCE_STUCK_BOOST_US,
-        (long)BALL_BALANCE_TARGET_CX_0,
-        (long)BALL_BALANCE_TARGET_CX_P5,
-        (long)BALL_BALANCE_TARGET_CX_N5,
-        (long)s_cycle_brake_gains[0],
-        (long)s_cycle_brake_gains[1],
-        (long)s_cycle_brake_gains[2]);
+    if (!BSP_Servo_Init())
+    {
+        (void)BSP_Debug_Printf("ERR,SERVO_INIT\r\n");
+        return false;
+    }
 
-    /*
-     * Init vision first (non-fatal) so the ball control module
-     * can receive frames once started.
-     */
+    if (!BSP_Servo_SetPulseUs(SERVO_NEUTRAL_US))
+    {
+        (void)BSP_Debug_Printf("ERR,SERVO_SET_NEUTRAL\r\n");
+        return false;
+    }
+
+    if (!BSP_Servo_Enable())
+    {
+        (void)BSP_Debug_Printf("ERR,SERVO_ENABLE\r\n");
+        return false;
+    }
+
     if (!Vision_Init())
     {
         (void)BSP_Debug_Printf("ERR,VISION_INIT\r\n");
@@ -704,394 +726,40 @@ bool Test_BallBalance_Init(void)
         (void)BSP_Debug_Printf("OK,VISION_INIT\r\n");
     }
 
-    if (!BallBalanceControl_Init())
-    {
-        (void)BSP_Debug_Printf(
-            "ERR,BALL_BALANCE_CONTROL_INIT\r\n");
-        return false;
-    }
-
-    if (BallBalanceControl_GetStatus(&control))
-    {
-        (void)BSP_Debug_Printf(
-            "OK,BALL_CONTROL,PULSE=%u,EN=%u,MODE=%s\r\n",
-            (unsigned int)control.servo_pulse_us,
-            control.servo_enabled ? 1U : 0U,
-            BallBalanceControl_ModeName(control.mode));
-    }
-
-    /* Init keys and OLED for menu interaction. */
-    if (!BSP_Key_Init())
-    {
-        (void)BSP_Debug_Printf("ERR,KEY_INIT\r\n");
-        return false;
-    }
-
-    if (!BSP_Oled_Init())
-    {
-        (void)BSP_Debug_Printf(
-            "ERR,OLED_INIT,CHECK=I2C1_400KHZ_IRQ\r\n");
-        return false;
-    }
-
-    if (!TaskMenuUi_Init())
-    {
-        (void)BSP_Debug_Printf("ERR,TASK_MENU_INIT\r\n");
-        return false;
-    }
-
     now_ms = HAL_GetTick();
+    s_task_start_ms = now_ms;
+    s_state_start_ms = now_ms;
     s_last_print_ms = now_ms;
     s_last_heartbeat_ms = now_ms;
-    s_last_oled_ms = now_ms;
     s_initialized = true;
 
     (void)BSP_Debug_Printf(
-        "BALL_BAL,READY,STATE=MENU,"
-        "KEY=UP_PA0_K0_PE4,OLED=SSD1306_128X64\r\n");
+        "BALL_BAL,START,CTRL=ONE_SHOT_PREDICT_CAPTURE,"
+        "SEQ=O_TO_POS5_TO_NEG5,LIMIT_MS=%lu,"
+        "O=%u,POS5=%u,NEG5=%u,NEUTRAL=%u,"
+        "POS5_TOL=%d,NEG5_CAPTURE=%d,FINAL_TOL_MM=%d,FINAL_SPD=%d,"
+        "FINISH=FIRST_STOP_IN_WINDOW\r\n",
+        (unsigned long)BALL_RUN_LIMIT_MS,
+        (unsigned int)BALL_TARGET_CX_O,
+        (unsigned int)BALL_TARGET_CX_P5,
+        (unsigned int)BALL_TARGET_CX_N5,
+        (unsigned int)SERVO_NEUTRAL_US,
+        BALL_POS5_SWITCH_ERR_PX,
+        BALL_NEG5_CAPTURE_ERR_PX,
+        BALL_FINAL_TOLERANCE_MM,
+        BALL_FINAL_SPEED_PX);
+
     return true;
 }
 
 void Test_BallBalance_Update(void)
 {
-    VisionStatus_t vision_status;
-    BallBalanceControlStatus_t control;
-    bool have_vision_status = false;
-    bool have_control_status;
-    bool control_update_ok = true;
     uint32_t now_ms;
-    TaskMenuTask_t start_task;
-
-    if (!s_initialized)
-    {
-        return;
-    }
+    VisionStatus_t vision_status;
+    bool have_status;
+    bool new_valid_frame = false;
 
     BSP_DebugUart_Process();
-    BSP_Key_Process();
-    BSP_Oled_Process();
-
-    switch (s_state)
-    {
-        case BALL_TEST_STATE_MENU:
-            TaskMenuUi_Process();
-
-            if (TaskMenuUi_TakeStartRequest(&start_task))
-            {
-                /*
-                 * Map menu task to ball strategy.
-                 */
-                switch (start_task)
-                {
-                    case TASK_MENU_TASK_3_BALL_SEQUENCE:
-                        s_strategy = BALL_STRATEGY_3PHASE;
-                        break;
-
-                    case TASK_MENU_TASK_4_AB_HOLD:
-                        s_strategy = BALL_STRATEGY_AB_HOLD;
-                        break;
-
-                    default:
-                        /*
-                         * Unknown task: log and return to
-                         * menu immediately.
-                         */
-                        (void)BSP_Debug_Printf(
-                            "BALL_BAL,NO_IMPL,TASK=%u\r\n",
-                            (unsigned int)start_task);
-                        TaskMenuUi_SetFinished();
-                        return;
-                }
-
-                BallTest_ResetStrategy();
-
-                /*
-                 * Set initial target for the selected strategy.
-                 */
-                if (s_strategy == BALL_STRATEGY_3PHASE)
-                {
-                    (void)BallBalanceControl_SetTargetX(
-                        (int32_t)s_cycle_targets[0]);
-                }
-                else
-                {
-                    (void)BallBalanceControl_SetTargetX(
-                        BALL_BALANCE_TARGET_CX_A);
-                }
-
-                s_state = BALL_TEST_STATE_RUNNING;
-                s_last_oled_ms = 0U; /* force immediate redraw */
-                BallTest_RenderRunning();
-
-                (void)BSP_Debug_Printf(
-                    "BALL_BAL,START,STRATEGY=%s\r\n",
-                    BallStrategy_Name(s_strategy));
-            }
-            break;
-
-        case BALL_TEST_STATE_RUNNING:
-            /*
-             * Run vision and ball control.
-             */
-            if (s_vision_ok)
-            {
-                Vision_Update();
-                have_vision_status =
-                    Vision_GetStatus(&vision_status);
-
-                if (have_vision_status)
-                {
-                    control_update_ok =
-                        BallBalanceControl_Update(
-                            &vision_status);
-                }
-            }
-
-            have_control_status =
-                BallBalanceControl_GetStatus(&control);
-            now_ms = HAL_GetTick();
-
-            if (have_control_status)
-            {
-                if (!Test_BallBalance_UpdateTargetCycle(
-                        &control,
-                        now_ms))
-                {
-                    (void)BSP_Debug_Printf(
-                        "ERR,BALL_TARGET_SWITCH\r\n");
-                }
-                else
-                {
-                    /*
-                     * Refresh status after a possible
-                     * cycle switch.
-                     */
-                    have_control_status =
-                        BallBalanceControl_GetStatus(
-                            &control);
-                }
-
-                Test_BallBalance_PrintEvent(&control);
-
-                /*
-                 * 3-phase cycle timer: 0cm departure → -5cm arrival.
-                 */
-                if (s_strategy == BALL_STRATEGY_3PHASE)
-                {
-                    uint8_t phase = s_cycle_phase;
-
-                    /* Detect phase 0 → 1 transition. */
-                    if ((s_cycle_phase_prev == 0U) &&
-                        (phase == 1U) &&
-                        (s_timer_state == CYCLE_TIMER_IDLE))
-                    {
-                        s_timer_start_ms = now_ms;
-                        s_timer_state = CYCLE_TIMER_RUNNING;
-                        (void)BSP_Debug_Printf(
-                            "BALL_BAL,TIMER,START,"
-                            "CYCLE=%lu\r\n",
-                            (unsigned long)s_cycle_count);
-                    }
-
-                    /*
-                     * Detect arrival at -5cm ± 1cm:
-                     * phase == 2, HOLD mode, cx within
-                     * 43 px of 447 (±1 cm).
-                     */
-                    if ((phase == 2U) &&
-                        (s_timer_state ==
-                         CYCLE_TIMER_RUNNING) &&
-                        (control.mode ==
-                         BALL_BALANCE_MODE_HOLD))
-                    {
-                        int32_t dist;
-
-                        dist = Test_BallBalance_AbsI32(
-                            (int32_t)control.center_x -
-                            (int32_t)BALL_BALANCE_TARGET_CX_N5);
-
-                        if (dist <= 43)
-                        {
-                            s_last_cycle_time_ms =
-                                (uint32_t)(now_ms -
-                                           s_timer_start_ms);
-                            s_cycle_count++;
-                            s_timer_state =
-                                CYCLE_TIMER_DONE;
-
-                            (void)BSP_Debug_Printf(
-                                "BALL_BAL,TIMER,STOP,"
-                                "CYCLE=%lu,"
-                                "TIME_MS=%lu,"
-                                "CX=%ld\r\n",
-                                (unsigned long)s_cycle_count,
-                                (unsigned long)
-                                    s_last_cycle_time_ms,
-                                (long)control.center_x);
-                        }
-                    }
-
-                    /*
-                     * Reset for next cycle when phase
-                     * returns to 0.
-                     */
-                    if ((s_cycle_phase_prev == 2U) &&
-                        (phase == 0U) &&
-                        (s_timer_state ==
-                         CYCLE_TIMER_DONE))
-                    {
-                        s_timer_state = CYCLE_TIMER_IDLE;
-                    }
-
-                    s_cycle_phase_prev = phase;
-                }
-            }
-
-            /*
-             * Servo error reporting (HEAD logic).
-             */
-            if (!control_update_ok &&
-                have_control_status &&
-                (control.servo_error_count !=
-                 s_last_servo_error_count))
-            {
-                s_last_servo_error_count =
-                    control.servo_error_count;
-
-                (void)BSP_Debug_Printf(
-                    "ERR,BALL_SERVO_CMD,COUNT=%lu,"
-                    "MODE=%s,EVENT=%s\r\n",
-                    (unsigned long)control.servo_error_count,
-                    BallBalanceControl_ModeName(control.mode),
-                    BallBalanceControl_EventName(
-                        control.last_event));
-            }
-            else if (!control_update_ok &&
-                     !have_control_status)
-            {
-                /*
-                 * Control status unavailable fallback
-                 * (HEAD logic).
-                 */
-                (void)BSP_Debug_Printf(
-                    "ERR,BALL_CONTROL_UPDATE,"
-                    "STATUS=UNAVAILABLE\r\n");
-            }
-
-            /*
-             * Heartbeat log.
-             */
-            if ((uint32_t)(now_ms - s_last_heartbeat_ms) >=
-                TEST_BALL_BALANCE_HEARTBEAT_MS)
-            {
-                s_last_heartbeat_ms = now_ms;
-
-                if (s_vision_ok &&
-                    have_vision_status &&
-                    have_control_status)
-                {
-                    (void)BSP_Debug_Printf(
-                        "BALL_BAL,HB,SEQ=%lu,VF=%lu,IF=%lu,"
-                        "PO=%lu,UE=%lu,VALID=%u,MODE=%s\r\n",
-                        (unsigned long)vision_status.sequence,
-                        (unsigned long)vision_status.valid_frame_count,
-                        (unsigned long)vision_status.invalid_frame_count,
-                        (unsigned long)vision_status.protocol_overflow_count,
-                        (unsigned long)vision_status.uart_error_count,
-                        vision_status.data_valid ? 1U : 0U,
-                        BallBalanceControl_ModeName(control.mode));
-                }
-                else if (have_control_status)
-                {
-                    (void)BSP_Debug_Printf(
-                        "BALL_BAL,HB,VISION=0,PULSE=%u,"
-                        "MODE=%s\r\n",
-                        (unsigned int)control.servo_pulse_us,
-                        BallBalanceControl_ModeName(control.mode));
-                }
-            }
-
-            /*
-             * Period status log.
-             */
-            if (have_control_status &&
-                ((uint32_t)(now_ms - s_last_print_ms) >=
-                 TEST_BALL_BALANCE_PRINT_PERIOD_MS))
-            {
-                s_last_print_ms = now_ms;
-
-                if (control.has_target)
-                {
-                    (void)BSP_Debug_Printf(
-                        "BALL_BAL,CX=%ld,TARGET=%ld,ERR=%ld,"
-                        "SPD=%ld,D=%ld,"
-                        "MODE=%s,BOOST=%lu,PULSE=%u,"
-                        "BRAKE_G=%ld,PH=%u\r\n",
-                        (long)control.center_x,
-                        (long)control.target_x,
-                        (long)control.error,
-                        (long)control.speed,
-                        (long)control.delta_us,
-                        BallBalanceControl_ModeName(control.mode),
-                        (unsigned long)control.stuck_boost_us,
-                        (unsigned int)control.servo_pulse_us,
-                        (long)control.brake_distance_gain,
-                        (unsigned int)s_cycle_phase);
-                }
-                else
-                {
-                    (void)BSP_Debug_Printf(
-                        "BALL_BAL,NO_TARGET,LOST=%lu,"
-                        "MODE=%s,PULSE=%u\r\n",
-                        (unsigned long)control.lost_frames,
-                        BallBalanceControl_ModeName(control.mode),
-                        (unsigned int)control.servo_pulse_us);
-                }
-            }
-
-            /*
-             * OLED refresh at reduced rate.
-             */
-            if ((uint32_t)(now_ms - s_last_oled_ms) >=
-                TEST_BALL_BALANCE_OLED_REFRESH_MS)
-            {
-                s_last_oled_ms = now_ms;
-                BallTest_RenderRunning();
-            }
-
-            /*
-             * KEY0 stops the running task.
-             */
-            if (BSP_Key_TakePress(BSP_KEY_CONFIRM))
-            {
-                (void)BSP_Debug_Printf(
-                    "BALL_BAL,STOP_REQUEST,STRATEGY=%s\r\n",
-                    BallStrategy_Name(s_strategy));
-
-                BallBalanceControl_Stop();
-                s_state = BALL_TEST_STATE_MENU;
-                TaskMenuUi_SetFinished();
-
-                /*
-                 * Re-init the control module so the servo
-                 * returns to center and is ready for the
-                 * next start.
-                 */
-                (void)BallBalanceControl_Init();
-            }
-            break;
-
-        default:
-            s_state = BALL_TEST_STATE_MENU;
-            break;
-    }
-}
-
-void Test_BallBalance_Stop(void)
-{
-    BallBalanceControlStatus_t control;
-    uint16_t pulse_us =
-        BALL_BALANCE_SERVO_CENTER_US;
 
     if (!s_initialized)
     {
@@ -1100,28 +768,206 @@ void Test_BallBalance_Stop(void)
 
     if (s_vision_ok)
     {
-        Vision_Stop();
+        Vision_Update();
     }
 
-    if (BallBalanceControl_GetStatus(&control))
+    have_status = s_vision_ok && Vision_GetStatus(&vision_status);
+    now_ms = HAL_GetTick();
+
+    if (have_status &&
+        vision_status.has_frame &&
+        (vision_status.sequence != s_last_vision_sequence))
     {
-        pulse_us = control.servo_pulse_us;
+        s_last_vision_sequence = vision_status.sequence;
+
+        if (vision_status.frame.found)
+        {
+            s_last_cx = (int32_t)vision_status.frame.center_x;
+            s_last_x_mm = (int32_t)vision_status.frame.physical_x_mm;
+            s_last_error_mm = BALL_TARGET_N5_MM - s_last_x_mm;
+            s_last_error = (int32_t)s_target_cx - s_last_cx;
+            s_has_target = true;
+            s_lost_frames = 0U;
+
+            if (s_prev_cx != 0)
+            {
+                s_raw_speed = s_last_cx - s_prev_cx;
+                /* 1/2 low-pass: noise reduction without the old long phase lag. */
+                s_speed = (s_speed + s_raw_speed) / 2;
+            }
+            else
+            {
+                s_raw_speed = 0;
+                s_speed = 0;
+            }
+            s_prev_cx = s_last_cx;
+            new_valid_frame = true;
+        }
+        else
+        {
+            s_has_target = false;
+            s_lost_frames++;
+        }
     }
 
-    BallBalanceControl_Stop();
+    if (new_valid_frame)
+    {
+        switch (s_state)
+        {
+            case BALL_STATE_WAIT_CENTER:
+                Ball_ControlWaitCenter(now_ms);
+                break;
 
-    BSP_Oled_Clear();
+            case BALL_STATE_TO_POS5:
+                Ball_ControlToPos5(now_ms);
+                break;
 
-    s_vision_ok = false;
+            case BALL_STATE_TURN_BRAKE:
+                Ball_ControlTurnBrake(now_ms);
+                break;
+
+            case BALL_STATE_TO_NEG5:
+                Ball_ControlToNeg5(now_ms);
+                break;
+
+            case BALL_STATE_SETTLE_NEG5:
+                Ball_ControlFinalHold(true, now_ms);
+                break;
+
+            case BALL_STATE_FINISHED:
+                /*
+                 * Result/time stay latched, but keep a gentle background loop
+                 * so the ball cannot roll out of the accepted +/-1 cm window.
+                 */
+                Ball_ControlFinishedAntiDrift();
+                break;
+
+            case BALL_STATE_TIMEOUT:
+            default:
+                Ball_SetPulse(SERVO_NEUTRAL_US, "TIMEOUT_HOLD");
+                break;
+        }
+    }
+
+    if ((s_lost_frames >= BALL_LOST_TIMEOUT_FRAMES) &&
+        (s_state != BALL_STATE_FINISHED))
+    {
+        Ball_SetPulse(SERVO_NEUTRAL_US, "VISION_LOST");
+        s_lost_frames = 0U;
+    }
+
+    if ((!s_result_done) &&
+        s_motion_timer_started &&
+        (Ball_GetMotionElapsedMs(now_ms) >= BALL_RUN_LIMIT_MS))
+    {
+        s_state = BALL_STATE_TIMEOUT;
+        s_target_cx = BALL_TARGET_CX_N5;
+        s_last_error = (int32_t)s_target_cx - s_last_cx;
+        Ball_SetPulse(SERVO_NEUTRAL_US, "TIMEOUT_HOLD");
+        Ball_ReportResult(false, "RUN_LIMIT", now_ms);
+    }
+
+    if ((uint32_t)(now_ms - s_last_heartbeat_ms) >= BALL_HEARTBEAT_MS)
+    {
+        s_last_heartbeat_ms = now_ms;
+        (void)BSP_Debug_Printf(
+            "BALL_BAL,HB,STATE=%s,T=%lums,CX=%ld,ERR=%+ld,SPD=%+ld,"
+            "PULSE=%u,VISION=%u\r\n",
+            Ball_StateName(s_state),
+            (unsigned long)(now_ms - s_task_start_ms),
+            (long)s_last_cx,
+            (long)s_last_error,
+            (long)s_speed,
+            (unsigned int)s_servo_pulse,
+            s_vision_ok ? 1U : 0U);
+    }
+
+    if ((uint32_t)(now_ms - s_last_print_ms) >= BALL_PRINT_PERIOD_MS)
+    {
+        s_last_print_ms = now_ms;
+
+        if (s_has_target)
+        {
+            (void)BSP_Debug_Printf(
+                "BALL_BAL,STATE=%s,T=%lums,CX=%ld,X_MM=%ld,TARGET=%u,ERR=%+ld,"
+                "RAW_SPD=%+ld,SPD=%+ld,MODE=%s,PULSE=%u,STABLE=%lu\r\n",
+                Ball_StateName(s_state),
+                (unsigned long)(now_ms - s_task_start_ms),
+                (long)s_last_cx,
+                (long)s_last_x_mm,
+                (unsigned int)s_target_cx,
+                (long)s_last_error,
+                (long)s_raw_speed,
+                (long)s_speed,
+                s_control_mode,
+                (unsigned int)s_servo_pulse,
+                (unsigned long)s_final_stable_frames,
+                (long)s_finish_hold_bias_us);
+        }
+        else
+        {
+            (void)BSP_Debug_Printf(
+                "BALL_BAL,STATE=%s,T=%lums,NO_TARGET,LOST=%lu,PULSE=%u\r\n",
+                Ball_StateName(s_state),
+                (unsigned long)(now_ms - s_task_start_ms),
+                (unsigned long)s_lost_frames,
+                (unsigned int)s_servo_pulse);
+        }
+    }
+}
+
+void Test_BallBalance_Stop(void)
+{
+    if (!s_initialized)
+    {
+        return;
+    }
+
+    (void)BSP_Servo_SetPulseUs(SERVO_NEUTRAL_US);
+    Vision_Stop();
+    BSP_Servo_Disable();
     s_initialized = false;
+    s_vision_ok = false;
 
     (void)BSP_Debug_Printf(
-        "BALL_BAL,STOP,PREV_PULSE=%u,CENTER=%u\r\n",
-        (unsigned int)pulse_us,
-        (unsigned int)BALL_BALANCE_SERVO_CENTER_US);
+        "BALL_BAL,STOP,RESULT=%s,PULSE=%u\r\n",
+        s_result_passed ? "PASS" : (s_result_done ? "FAIL" : "ABORT"),
+        (unsigned int)SERVO_NEUTRAL_US);
 }
 
 bool Test_BallBalance_IsInitialized(void)
 {
     return s_initialized;
+}
+
+bool Test_BallBalance_IsFinished(void)
+{
+    return s_result_done;
+}
+
+bool Test_BallBalance_Passed(void)
+{
+    return s_result_done && s_result_passed;
+}
+
+bool Test_BallBalance_IsTimerRunning(void)
+{
+    return s_initialized &&
+           s_motion_timer_started &&
+           (!s_result_done);
+}
+
+uint32_t Test_BallBalance_GetElapsedMs(void)
+{
+    if (s_result_done)
+    {
+        return s_result_elapsed_ms;
+    }
+
+    if (s_initialized && s_motion_timer_started)
+    {
+        return Ball_GetMotionElapsedMs(HAL_GetTick());
+    }
+
+    return 0U;
 }

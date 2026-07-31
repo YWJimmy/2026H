@@ -55,7 +55,6 @@ typedef struct
     int32_t error;
     int32_t speed;
     int32_t delta_us;
-    int32_t brake_distance_gain;
 
     uint16_t servo_pulse_us;
 } BallBalanceControlStatus_t;
@@ -68,15 +67,6 @@ bool BallBalanceControl_Init(void);
 
 /* Update the requested ball center in the vision X coordinate system. */
 bool BallBalanceControl_SetTargetX(int32_t target_x);
-
-/*
- * Runtime brake distance gain override.
- * Defaults to BALL_BALANCE_BRAKE_DISTANCE_GAIN (5).
- * For 3-phase cycle, phase 2 (-5cm) uses BALL_BALANCE_BRAKE_DISTANCE_GAIN_N5 (10).
- * Returns false if gain <= 0.
- */
-bool BallBalanceControl_SetBrakeGain(int32_t gain);
-int32_t BallBalanceControl_GetBrakeGain(void);
 
 /*
  * 提交Vision模块的最新状态。

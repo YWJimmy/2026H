@@ -1,4 +1,4 @@
----
+﻿---
 title: "8路红外巡线传感器与 STM32F407ZGT6 UART 通信说明"
 subtitle: "面向项目成员与 AI 的统一技术文档"
 author: "2026H 项目"

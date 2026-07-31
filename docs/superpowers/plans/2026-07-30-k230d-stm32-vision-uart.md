@@ -1,4 +1,4 @@
-# K230D 与 STM32 视觉串口通信 Implementation Plan
+﻿# K230D 与 STM32 视觉串口通信 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

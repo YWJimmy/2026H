@@ -23,7 +23,7 @@
  * 第一阶段默认只测试OLED、按键和两次确认菜单流程，
  * 不启动电机和舵机。
  */
-#define PROJECT_TEST_MODE                   TEST_MODE_BALL_BALANCE
+#define PROJECT_TEST_MODE                   TEST_MODE_OLED_KEY
 #endif
 
 #endif /* TEST_CONFIG_H */

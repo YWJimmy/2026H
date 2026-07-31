@@ -1,4 +1,4 @@
-CMSIS DSP_Lib example arm_graphic_equalizer_example.
+﻿CMSIS DSP_Lib example arm_graphic_equalizer_example.
 
 The example is available for different targets:
   Cortex-M0
