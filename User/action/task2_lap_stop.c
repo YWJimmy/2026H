@@ -34,6 +34,18 @@ static int32_t s_stop_decel_mm_s2 = 0;
 static int32_t s_stop_jerk_mm_s3 = 0;
 static uint32_t s_fault_detail = 0U;
 
+/*
+ * Task2LapStop_Update() is non-reentrant and runs only in the main loop.
+ * Keep its large snapshots out of the 1 kB-class call stack: together these
+ * structures occupy more than 400 bytes before nested control and printf
+ * calls are counted.
+ */
+static LineSensorFrame_t s_frame_snapshot;
+static LineFollowResult_t s_line_result_snapshot;
+static LineFollowControlStatus_t s_control_snapshot;
+static DistanceTrackerStatus_t s_distance_snapshot;
+static ChassisStatus_t s_chassis_snapshot;
+
 static int32_t Task2_AbsI32(int32_t value)
 {
     if (value >= 0)
@@ -284,11 +296,6 @@ bool Task2LapStop_Start(uint32_t start_timestamp_ms)
 
 Task2LapStopResult_t Task2LapStop_Update(uint32_t now_ms)
 {
-    LineSensorFrame_t frame;
-    LineFollowResult_t result;
-    LineFollowControlStatus_t control;
-    DistanceTrackerStatus_t distance;
-    ChassisStatus_t chassis;
     bool middle_four_black = false;
     bool has_new_line_result = false;
     bool distance_stop_completed;
@@ -306,10 +313,12 @@ Task2LapStopResult_t Task2LapStop_Update(uint32_t now_ms)
         return Task2_Fault(6U);
     }
 
-    if (LineSensor_Update() && LineSensor_GetFrame(&frame))
+    if (LineSensor_Update() &&
+        LineSensor_GetFrame(&s_frame_snapshot))
     {
-        if (!LineFollow_Update(&frame) ||
-            !LineFollow_GetResult(&result))
+        if (!LineFollow_Update(&s_frame_snapshot) ||
+            !LineFollow_GetResult(
+                &s_line_result_snapshot))
         {
             if ((s_state != TASK2_STATE_DISTANCE_STOPPING) &&
                 (s_state != TASK2_STATE_USER_STOPPING))
@@ -321,10 +330,12 @@ Task2LapStopResult_t Task2LapStop_Update(uint32_t now_ms)
         {
             has_new_line_result = true;
             middle_four_black =
-                ((result.black_mask & TASK2_A_LINE_CENTER_MASK) ==
+                ((s_line_result_snapshot.black_mask &
+                  TASK2_A_LINE_CENTER_MASK) ==
                  TASK2_A_LINE_CENTER_MASK);
 
-            if (!LineFollowControl_Submit(&result) &&
+            if (!LineFollowControl_Submit(
+                    &s_line_result_snapshot) &&
                 (s_state != TASK2_STATE_DISTANCE_STOPPING) &&
                 (s_state != TASK2_STATE_USER_STOPPING))
             {
@@ -335,14 +346,17 @@ Task2LapStopResult_t Task2LapStop_Update(uint32_t now_ms)
 
     LineFollowControl_Process();
 
-    if (!DistanceTracker_GetStatus(&distance) ||
-        !LineFollowControl_GetStatus(&control) ||
-        !Chassis_GetStatus(&chassis))
+    if (!DistanceTracker_GetStatus(&s_distance_snapshot) ||
+        !LineFollowControl_GetStatus(&s_control_snapshot) ||
+        !Chassis_GetStatus(&s_chassis_snapshot))
     {
         return Task2_Fault(8U);
     }
 
-    Task2_Report(now_ms, &distance, &control);
+    Task2_Report(
+        now_ms,
+        &s_distance_snapshot,
+        &s_control_snapshot);
 
     if ((s_state == TASK2_STATE_DISTANCE_STOPPING) ||
         (s_state == TASK2_STATE_USER_STOPPING))
@@ -361,14 +375,15 @@ Task2LapStopResult_t Task2LapStop_Update(uint32_t now_ms)
                 (s_state == TASK2_STATE_DISTANCE_STOPPING);
             s_stop_offset_mm = distance_stop_completed ?
                 Task2_AbsI32(
-                    distance.center_signed_mm - s_line_center_mm) :
+                    s_distance_snapshot.center_signed_mm -
+                    s_line_center_mm) :
                 0;
             s_state = TASK2_STATE_FINISHED;
 
             (void)BSP_Debug_Printf(
                 "T2,FINISH=1,MS=%lu,DIST=%lu,OFFSET=%ld,ERR=%ld\r\n",
                 (unsigned long)(now_ms - s_start_ms),
-                (unsigned long)distance.traveled_mm,
+                (unsigned long)s_distance_snapshot.traveled_mm,
                 (long)s_stop_offset_mm,
                 distance_stop_completed ?
                     (long)(s_stop_offset_mm -
@@ -392,7 +407,8 @@ Task2LapStopResult_t Task2LapStop_Update(uint32_t now_ms)
     }
 
     if ((s_state == TASK2_STATE_LAP_RUNNING) &&
-        (distance.traveled_mm >= TASK2_PREDECEL_DISTANCE_MM))
+        (s_distance_snapshot.traveled_mm >=
+         TASK2_PREDECEL_DISTANCE_MM))
     {
         if (!LineFollowControl_SetBaseSpeedRangeMmps(
                 TASK2_PREDECEL_CENTER_SPEED_MM_S,
@@ -403,12 +419,13 @@ Task2LapStopResult_t Task2LapStop_Update(uint32_t now_ms)
         s_state = TASK2_STATE_PREDECEL;
         (void)BSP_Debug_Printf(
             "T2,PREDECEL=1,DIST=%lu,TARGET=%ld\r\n",
-            (unsigned long)distance.traveled_mm,
+            (unsigned long)s_distance_snapshot.traveled_mm,
             (long)TASK2_PREDECEL_CENTER_SPEED_MM_S);
     }
 
     if (has_new_line_result &&
-        (distance.traveled_mm >= TASK2_LINE_ENABLE_DISTANCE_MM) &&
+        (s_distance_snapshot.traveled_mm >=
+         TASK2_LINE_ENABLE_DISTANCE_MM) &&
         middle_four_black)
     {
         if (!s_line_candidate)
@@ -421,9 +438,9 @@ Task2LapStopResult_t Task2LapStop_Update(uint32_t now_ms)
             TASK2_A_LINE_CONFIRM_MS)
         {
             if (!Task2_StartDistanceStop(
-                    &distance,
-                    &chassis,
-                    &control))
+                    &s_distance_snapshot,
+                    &s_chassis_snapshot,
+                    &s_control_snapshot))
             {
                 return Task2_Fault(12U);
             }

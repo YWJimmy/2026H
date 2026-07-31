@@ -13,6 +13,11 @@
 
 #include <stddef.h>
 
+#define MAIN_APP_STACK_GUARD_VALUE       ((uint32_t)0x53544731UL)
+#define MAIN_APP_STACK_GUARD_FAULT       ((uint32_t)0x53544701UL)
+
+extern uint32_t Stack_Mem;
+
 static MainAppStatus_t s_status;
 
 static AppState_t s_last_logged_state =
@@ -23,6 +28,18 @@ static bool s_key_ready = false;
 static bool s_oled_ready = false;
 static bool s_ui_ready = false;
 static bool s_task_manager_ready = false;
+
+static void MainApp_InitStackGuard(void)
+{
+    *((volatile uint32_t *)&Stack_Mem) =
+        MAIN_APP_STACK_GUARD_VALUE;
+}
+
+static bool MainApp_IsStackGuardValid(void)
+{
+    return (*((volatile uint32_t *)&Stack_Mem) ==
+            MAIN_APP_STACK_GUARD_VALUE);
+}
 
 static bool MainApp_Elapsed(
     uint32_t now_ms,
@@ -275,6 +292,8 @@ bool MainApp_Init(void)
 {
     uint32_t now_ms = HAL_GetTick();
 
+    MainApp_InitStackGuard();
+
     s_key_ready = false;
     s_oled_ready = false;
     s_ui_ready = false;
@@ -400,6 +419,15 @@ void MainApp_Update(void)
     if (s_task_manager_ready)
     {
         AppTaskManager_Update();
+
+        if (!MainApp_IsStackGuardValid())
+        {
+            MainApp_EnterFault(
+                APP_FAULT_TASK_RUNTIME,
+                MAIN_APP_STACK_GUARD_FAULT);
+            MainApp_LogStateIfChanged();
+            return;
+        }
     }
     MainApp_UpdateDistance();
 

@@ -38,12 +38,10 @@ static uint16_t Servo_ClampPulseUs(int32_t pulse_us)
 
 static uint16_t Servo_LogicalToHardwarePulseUs(uint16_t logical_pulse_us)
 {
+#if BSP_SERVO_REVERSED == 0U
+    return logical_pulse_us;
+#else
     int32_t hardware_pulse_us;
-
-    if (BSP_SERVO_REVERSED == 0U)
-    {
-        return logical_pulse_us;
-    }
 
     hardware_pulse_us =
         (int32_t)BSP_SERVO_PULSE_CENTER_US -
@@ -51,6 +49,7 @@ static uint16_t Servo_LogicalToHardwarePulseUs(uint16_t logical_pulse_us)
          (int32_t)BSP_SERVO_PULSE_CENTER_US);
 
     return Servo_ClampPulseUs(hardware_pulse_us);
+#endif
 }
 
 static void Servo_WriteCompare(uint16_t logical_pulse_us)
