@@ -2,6 +2,7 @@
 
 #include "bsp_debug_uart.h"
 #include "chassis.h"
+#include "distance_tracker.h"
 #include "stm32f4xx_hal.h"
 
 #include <stdint.h>
@@ -63,6 +64,7 @@ void Test_ChassisStraight_Update(void)
 {
     uint32_t now_ms;
     ChassisStatus_t status;
+    DistanceTrackerStatus_t distance;
     int32_t total_diff;
 
     BSP_DebugUart_Process();
@@ -98,6 +100,17 @@ void Test_ChassisStraight_Update(void)
                 (long)status.right_total,
                 (long)total_diff,
                 (unsigned long)status.timing_overrun_count);
+
+            if (DistanceTracker_GetStatus(&distance))
+            {
+                (void)BSP_Debug_Printf(
+                    "DIST,L=%ld,R=%ld,C=%ld,TR=%lu,DIFF=%ld\r\n",
+                    (long)distance.left_signed_mm,
+                    (long)distance.right_signed_mm,
+                    (long)distance.center_signed_mm,
+                    (unsigned long)distance.traveled_mm,
+                    (long)distance.wheel_difference_mm);
+            }
         }
     }
 

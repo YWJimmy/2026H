@@ -1,6 +1,11 @@
 #include "app_task_port.h"
 
 #include "app_config.h"
+#include "ball_balance_control.h"
+#include "bsp_servo.h"
+#include "chassis.h"
+#include "distance_tracker.h"
+#include "line_follow_control.h"
 
 static bool s_initialized = false;
 static bool s_active = false;
@@ -9,6 +14,11 @@ static TaskMenuTask_t s_task =
 
 bool AppTaskPort_Init(void)
 {
+    if (!DistanceTracker_Init())
+    {
+        return false;
+    }
+
     s_initialized = true;
     s_active = false;
     s_task = TASK_MENU_TASK_2_LAP_STOP;
@@ -31,6 +41,8 @@ bool AppTaskPort_Start(
     {
         return false;
     }
+
+    DistanceTracker_Reset();
 
     s_task = task;
     s_active = true;
@@ -87,9 +99,35 @@ bool AppTaskPort_IsStopped(
     return !s_active;
 }
 
-void AppTaskPort_Reset(void)
+void AppTaskPort_ForceSafeStop(void)
 {
     s_active = false;
+
+    if (LineFollowControl_IsInitialized())
+    {
+        LineFollowControl_Shutdown();
+    }
+
+    if (BallBalanceControl_IsInitialized())
+    {
+        BallBalanceControl_Stop();
+    }
+
+    if (Chassis_IsInitialized())
+    {
+        Chassis_Stop();
+        (void)Chassis_Enable(false);
+    }
+
+    if (BSP_Servo_IsInitialized())
+    {
+        BSP_Servo_Disable();
+    }
+}
+
+void AppTaskPort_Reset(void)
+{
+    AppTaskPort_ForceSafeStop();
     s_task = TASK_MENU_TASK_2_LAP_STOP;
 }
 

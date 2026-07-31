@@ -38,6 +38,7 @@ typedef struct
     TaskMenuState_t state;
 
     uint32_t elapsed_ms;
+    uint32_t distance_mm;
     uint32_t warning_mask;
     uint32_t fault_code;
 
@@ -67,6 +68,7 @@ void TaskMenuUi_Process(void);
 
 void TaskMenuUi_SetState(TaskMenuState_t state);
 void TaskMenuUi_SetElapsedMs(uint32_t elapsed_ms);
+void TaskMenuUi_SetDistanceMm(uint32_t distance_mm);
 void TaskMenuUi_SetWarningMask(uint32_t warning_mask);
 void TaskMenuUi_SetStatusText(const char *text);
 

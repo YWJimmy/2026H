@@ -765,6 +765,11 @@
               <FilePath>..\User\module\chassis.c</FilePath>
             </File>
             <File>
+              <FileName>distance_tracker.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\module\distance_tracker.c</FilePath>
+            </File>
+            <File>
               <FileName>wheel_speed_control.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\module\wheel_speed_control.c</FilePath>

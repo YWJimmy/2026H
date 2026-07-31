@@ -39,6 +39,7 @@ bool AppTaskManager_Init(void)
 
     if (!AppTaskPort_Init())
     {
+        AppTaskPort_ForceSafeStop();
         return false;
     }
 
@@ -63,6 +64,7 @@ bool AppTaskManager_Start(
             task,
             start_timestamp_ms))
     {
+        AppTaskPort_ForceSafeStop();
         s_status.fault_detail =
             AppTaskPort_GetFaultDetail();
         AppTaskManager_SetState(
@@ -135,6 +137,7 @@ void AppTaskManager_Update(void)
                 if (!AppTaskPort_RequestStop(
                         s_status.task))
                 {
+                    AppTaskPort_ForceSafeStop();
                     s_status.fault_detail =
                         AppTaskPort_GetFaultDetail();
                     AppTaskManager_SetState(
@@ -155,6 +158,7 @@ void AppTaskManager_Update(void)
                 s_status.fault_detail =
                     AppTaskPort_GetFaultDetail();
 
+                AppTaskPort_ForceSafeStop();
                 AppTaskManager_SetState(
                     APP_TASK_MANAGER_FAULT,
                     now_ms);
@@ -179,6 +183,7 @@ void AppTaskManager_Update(void)
                          APP_TASK_STOP_TIMEOUT_MS))
             {
                 s_status.fault_detail = 1U;
+                AppTaskPort_ForceSafeStop();
                 AppTaskManager_SetState(
                     APP_TASK_MANAGER_FAULT,
                     now_ms);
@@ -218,6 +223,7 @@ bool AppTaskManager_RequestStop(
 
     if (!AppTaskPort_RequestStop(s_status.task))
     {
+        AppTaskPort_ForceSafeStop();
         s_status.fault_detail =
             AppTaskPort_GetFaultDetail();
         AppTaskManager_SetState(

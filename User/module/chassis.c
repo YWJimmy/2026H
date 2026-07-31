@@ -3,6 +3,7 @@
 #include "bsp_encoder.h"
 #include "bsp_motor.h"
 #include "chassis_config.h"
+#include "distance_tracker.h"
 #include "chassis_speed_profile.h"
 #include "stm32f4xx_hal.h"
 #include "wheel_speed_control.h"
@@ -489,6 +490,12 @@ bool Chassis_Init(void)
     memset(&s_status, 0, sizeof(s_status));
     memset(&s_speed_profile, 0, sizeof(s_speed_profile));
     memset(&s_profile_status, 0, sizeof(s_profile_status));
+
+    if (!DistanceTracker_Init())
+    {
+        return false;
+    }
+    DistanceTracker_Reset();
 
     if (!BSP_Motor_Init())
     {
@@ -1060,6 +1067,16 @@ bool Chassis_Update(void)
         s_status.control_sequence++;
         return false;
     }
+
+    /*
+     * 只统计已经通过底盘合理性检查的同一帧编码器增量。
+     * 路程模块不再次读取TIM3/TIM4。
+     */
+    (void)DistanceTracker_Update(
+        encoder_sample.left_delta,
+        encoder_sample.right_delta,
+        encoder_sample.sequence,
+        encoder_sample.timestamp_ms);
 
     if (!Chassis_UpdateSpeedProfile((uint16_t)elapsed_ms))
     {

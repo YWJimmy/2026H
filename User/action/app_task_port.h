@@ -39,6 +39,12 @@ bool AppTaskPort_RequestStop(
 bool AppTaskPort_IsStopped(
     TaskMenuTask_t task);
 
+/*
+ * 幂等安全停车：立即撤销任务活动状态，并将所有已初始化执行机构
+ * 带入安全状态。故障路径和系统关机均可重复调用。
+ */
+void AppTaskPort_ForceSafeStop(void);
+
 void AppTaskPort_Reset(void);
 
 const char *AppTaskPort_GetPhaseText(void);

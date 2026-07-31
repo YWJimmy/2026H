@@ -159,7 +159,7 @@ bool Test_WheelSpeed_Init(void)
 {
 #if TEST_WHEEL_SPEED_MODE_ENABLED == 0U
     return false;
-#endif
+#else
 
     s_initialized = false;
     s_finished = false;
@@ -200,6 +200,7 @@ bool Test_WheelSpeed_Init(void)
 
     Test_WheelSpeed_ApplyStep();
     return true;
+#endif
 }
 
 void Test_WheelSpeed_Update(void)

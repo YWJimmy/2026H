@@ -34,6 +34,8 @@ typedef struct
     uint32_t state_timestamp_ms;
     uint32_t run_start_timestamp_ms;
     uint32_t elapsed_ms;
+    int32_t center_distance_mm;
+    uint32_t traveled_distance_mm;
     uint32_t warning_mask;
 
     AppFaultCode_t fault_code;

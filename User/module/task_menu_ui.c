@@ -25,6 +25,7 @@ static bool s_menu_request = false;
 static bool s_reset_request = false;
 
 static uint32_t s_elapsed_ms = 0U;
+static uint32_t s_distance_mm = 0U;
 static uint32_t s_warning_mask = 0U;
 static uint32_t s_fault_code = 0U;
 
@@ -39,6 +40,14 @@ static uint32_t s_reset_request_count = 0U;
 
 static char s_status_text[TASK_MENU_STATUS_TEXT_SIZE];
 static char s_fault_name[TASK_MENU_STATUS_TEXT_SIZE];
+
+static void TaskMenu_ClearRequests(void)
+{
+    s_start_request = false;
+    s_stop_request = false;
+    s_menu_request = false;
+    s_reset_request = false;
+}
 
 static void TaskMenu_CopyText(
     char *destination,
@@ -168,6 +177,13 @@ static void TaskMenu_DrawElapsed(
     BSP_Oled_DrawString(90U, page, "S");
 }
 
+static void TaskMenu_DrawDistance(uint8_t page)
+{
+    BSP_Oled_DrawString(0U, page, "D:");
+    BSP_Oled_DrawU32(12U, page, s_distance_mm);
+    BSP_Oled_DrawString(84U, page, "MM");
+}
+
 static void TaskMenu_RenderBoot(void)
 {
     BSP_Oled_Clear();
@@ -260,6 +276,7 @@ static void TaskMenu_RenderRunning(void)
         1U,
         TaskMenuUi_TaskName(s_selected_task));
     TaskMenu_DrawElapsed(3U);
+    TaskMenu_DrawDistance(4U);
     BSP_Oled_DrawString(0U, 5U, s_status_text);
 
     if ((s_warning_mask &
@@ -283,6 +300,7 @@ static void TaskMenu_RenderStopping(void)
         2U,
         TaskMenuUi_TaskName(s_selected_task));
     TaskMenu_DrawElapsed(4U);
+    TaskMenu_DrawDistance(5U);
     BSP_Oled_DrawString(0U, 6U, s_status_text);
 }
 
@@ -295,6 +313,7 @@ static void TaskMenu_RenderFinished(void)
         2U,
         TaskMenuUi_TaskName(s_selected_task));
     TaskMenu_DrawElapsed(4U);
+    TaskMenu_DrawDistance(5U);
     BSP_Oled_DrawString(0U, 7U, "K0:MENU");
 }
 
@@ -362,12 +381,10 @@ bool TaskMenuUi_Init(void)
         TASK_MENU_TASK_2_LAP_STOP;
     s_state = TASK_MENU_STATE_BOOT;
 
-    s_start_request = false;
-    s_stop_request = false;
-    s_menu_request = false;
-    s_reset_request = false;
+    TaskMenu_ClearRequests();
 
     s_elapsed_ms = 0U;
+    s_distance_mm = 0U;
     s_warning_mask = 0U;
     s_fault_code = 0U;
 
@@ -407,16 +424,18 @@ void TaskMenuUi_Process(void)
             if (BSP_Key_TakePress(
                     BSP_KEY_SELECT))
             {
+                (void)BSP_Key_TakePress(
+                    BSP_KEY_CONFIRM);
                 s_selected_task =
                     TaskMenu_NextTask(
                         s_selected_task);
                 s_selection_change_count++;
                 s_display_dirty = true;
             }
-
-            if (BSP_Key_TakePress(
+            else if (BSP_Key_TakePress(
                     BSP_KEY_CONFIRM))
             {
+                TaskMenu_ClearRequests();
                 s_state = TASK_MENU_STATE_ARMED;
                 s_display_dirty = true;
             }
@@ -426,11 +445,13 @@ void TaskMenuUi_Process(void)
             if (BSP_Key_TakePress(
                     BSP_KEY_SELECT))
             {
+                (void)BSP_Key_TakePress(
+                    BSP_KEY_CONFIRM);
+                TaskMenu_ClearRequests();
                 s_state = TASK_MENU_STATE_SELECT;
                 s_display_dirty = true;
             }
-
-            if (BSP_Key_TakePress(
+            else if (BSP_Key_TakePress(
                     BSP_KEY_CONFIRM))
             {
                 s_start_request = true;
@@ -516,6 +537,7 @@ void TaskMenuUi_SetState(
         return;
     }
 
+    TaskMenu_ClearRequests();
     s_state = state;
     s_display_dirty = true;
 }
@@ -524,6 +546,23 @@ void TaskMenuUi_SetElapsedMs(
     uint32_t elapsed_ms)
 {
     s_elapsed_ms = elapsed_ms;
+}
+
+void TaskMenuUi_SetDistanceMm(
+    uint32_t distance_mm)
+{
+    if (s_distance_mm != distance_mm)
+    {
+        s_distance_mm = distance_mm;
+
+        if ((s_state == TASK_MENU_STATE_STARTING) ||
+            (s_state == TASK_MENU_STATE_RUNNING) ||
+            (s_state == TASK_MENU_STATE_STOPPING) ||
+            (s_state == TASK_MENU_STATE_FINISHED))
+        {
+            s_display_dirty = true;
+        }
+    }
 }
 
 void TaskMenuUi_SetWarningMask(
@@ -563,6 +602,7 @@ void TaskMenuUi_SetFault(
     uint32_t fault_code,
     const char *fault_name)
 {
+    TaskMenu_ClearRequests();
     s_fault_code = fault_code;
     TaskMenu_CopyText(
         s_fault_name,
@@ -655,6 +695,7 @@ bool TaskMenuUi_GetStatus(
     status->selected_task = s_selected_task;
     status->state = s_state;
     status->elapsed_ms = s_elapsed_ms;
+    status->distance_mm = s_distance_mm;
     status->warning_mask = s_warning_mask;
     status->fault_code = s_fault_code;
 
