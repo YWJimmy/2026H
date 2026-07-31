@@ -105,6 +105,179 @@ static const int32_t s_cycle_brake_gains[3] =
 
 /*
  * ---------------------------------------------------------------------------
+ * Cycle timer: 0cm departure → -5cm arrival
+ * ---------------------------------------------------------------------------
+ */
+typedef enum
+{
+    CYCLE_TIMER_IDLE = 0,
+    CYCLE_TIMER_RUNNING,
+    CYCLE_TIMER_DONE
+} CycleTimerState_t;
+
+static CycleTimerState_t s_timer_state = CYCLE_TIMER_IDLE;
+static uint32_t s_timer_start_ms = 0U;
+static uint32_t s_last_cycle_time_ms = 0U;
+static uint32_t s_cycle_count = 0U;
+static uint32_t s_cycle_phase_prev = 0U;
+
+/*
+ * ---------------------------------------------------------------------------
+ * 7-segment large digit layout (28 x 46 pixels per digit)
+ * ---------------------------------------------------------------------------
+ */
+#define LARGE_DIGIT_W       28U
+#define LARGE_DIGIT_H       46U
+#define LARGE_DIGIT_START_Y 9U
+
+/*
+ * Compute start X to center N large items (digits + DP) on the screen.
+ * Layout:  D0  D1  .  D2
+ * Spacing:  4px  2px 2px
+ */
+#define LARGE_DIGIT_COUNT   3U
+#define LARGE_DP_W          8U
+#define LARGE_DP_H          8U
+#define LARGE_GAP_DIGIT     4U
+#define LARGE_GAP_DP        2U
+
+#define LARGE_TOTAL_W \
+    ((LARGE_DIGIT_W * 3U) + (LARGE_GAP_DIGIT * 2U) + \
+     LARGE_DP_W + (LARGE_GAP_DP * 2U))
+#define LARGE_START_X \
+    ((BSP_OLED_WIDTH - LARGE_TOTAL_W) / 2U)
+
+/*
+ * Segment geometry relative to digit origin (dx, dy).
+ *   ---A---
+ *  |       |
+ *  F       B
+ *  |       |
+ *   ---G---
+ *  |       |
+ *  E       C
+ *  |       |
+ *   ---D---
+ */
+typedef struct
+{
+    uint8_t x;
+    uint8_t y;
+    uint8_t w;
+    uint8_t h;
+} SegmentDef_t;
+
+static const SegmentDef_t SEG_A = {4U,  0U,  20U, 6U};
+static const SegmentDef_t SEG_B = {24U, 5U,  4U,  17U};
+static const SegmentDef_t SEG_C = {24U, 24U, 4U,  17U};
+static const SegmentDef_t SEG_D = {4U,  40U, 20U, 6U};
+static const SegmentDef_t SEG_E = {0U,  24U, 4U,  17U};
+static const SegmentDef_t SEG_F = {0U,  5U,  4U,  17U};
+static const SegmentDef_t SEG_G = {4U,  22U, 20U, 6U};
+
+/*
+ * 7-segment truth table for digits 0-9.
+ * Bit[0]=A, Bit[1]=B, Bit[2]=C, Bit[3]=D,
+ * Bit[4]=E, Bit[5]=F, Bit[6]=G (1 = on).
+ */
+static const uint8_t SEG_MAP[10] =
+{
+    0x3FU, /* 0: A B C D E F   */
+    0x06U, /* 1:     B C       */
+    0x5BU, /* 2: A B   D E   G */
+    0x4FU, /* 3: A B C D     G */
+    0x66U, /* 4:   B C   E F G */
+    0x6DU, /* 5: A   C D   F G */
+    0x7DU, /* 6: A   C D E F G */
+    0x07U, /* 7: A B C         */
+    0x7FU, /* 8: A B C D E F G */
+    0x6FU  /* 9: A B C D   F G */
+};
+
+static const SegmentDef_t * const SEG_TABLE[7] =
+{
+    &SEG_A, &SEG_B, &SEG_C, &SEG_D, &SEG_E, &SEG_F, &SEG_G
+};
+
+static void BallTest_DrawLargeSeg(
+    uint8_t dx,
+    uint8_t dy,
+    const SegmentDef_t *seg)
+{
+    BSP_Oled_FillRect(
+        (uint8_t)(dx + seg->x),
+        (uint8_t)(dy + seg->y),
+        seg->w,
+        seg->h,
+        true);
+}
+
+static void BallTest_DrawLargeDigit(
+    uint8_t digit,
+    uint8_t dx,
+    uint8_t dy)
+{
+    uint8_t mask;
+    uint8_t i;
+
+    if (digit > 9U)
+    {
+        return;
+    }
+
+    mask = SEG_MAP[digit];
+
+    for (i = 0U; i < 7U; i++)
+    {
+        if ((mask & (1U << i)) != 0U)
+        {
+            BallTest_DrawLargeSeg(
+                dx, dy, SEG_TABLE[i]);
+        }
+    }
+}
+
+static void BallTest_DrawLargeDP(
+    uint8_t dx,
+    uint8_t dy)
+{
+    /* Small filled square as decimal point. */
+    BSP_Oled_FillRect(
+        dx, (uint8_t)(dy + LARGE_DIGIT_H - LARGE_DP_H),
+        LARGE_DP_W, LARGE_DP_H, true);
+}
+
+/*
+ * Draw the 3 large digits + decimal point.
+ * Format: D0 D1 . D2   (e.g. "12.3" = 12.3 seconds)
+ */
+static void BallTest_DrawLargeTime(
+    uint8_t d0,
+    uint8_t d1,
+    uint8_t d2)
+{
+    uint8_t x;
+
+    x = LARGE_START_X;
+
+    /* Digit 0 (tens of seconds). */
+    BallTest_DrawLargeDigit(d0, x, LARGE_DIGIT_START_Y);
+    x += (uint8_t)(LARGE_DIGIT_W + LARGE_GAP_DIGIT);
+
+    /* Digit 1 (ones of seconds). */
+    BallTest_DrawLargeDigit(d1, x, LARGE_DIGIT_START_Y);
+    x += (uint8_t)(LARGE_DIGIT_W + LARGE_GAP_DP);
+
+    /* Decimal point. */
+    BallTest_DrawLargeDP(x, LARGE_DIGIT_START_Y);
+    x += (uint8_t)(LARGE_DP_W + LARGE_GAP_DP);
+
+    /* Digit 2 (tenths of seconds). */
+    BallTest_DrawLargeDigit(d2, x, LARGE_DIGIT_START_Y);
+}
+
+/*
+ * ---------------------------------------------------------------------------
  * Helpers
  * ---------------------------------------------------------------------------
  */
@@ -154,7 +327,7 @@ static TaskMenuTask_t BallStrategy_ToMenuTask(
 static void BallTest_RenderRunning(void)
 {
     BallBalanceControlStatus_t control;
-    char line[32]; /* OLED 128px / 6 = 21 chars, 32 for safety */
+    char line[32];
 
     if (!BallBalanceControl_GetStatus(&control))
     {
@@ -163,43 +336,97 @@ static void BallTest_RenderRunning(void)
 
     BSP_Oled_Clear();
 
-    /* Page 0: strategy + phase (3-phase only) */
     if (s_strategy == BALL_STRATEGY_3PHASE)
     {
+        uint32_t elapsed_ms;
+        uint32_t display_ms;
+        uint8_t  d0, d1, d2;  /* tens, ones, tenths */
+
+        /*
+         * Compute display time.
+         * DONE  → frozen last-cycle time.
+         * IDLE  → 0.0 (waiting for start).
+         * RUN   → live elapsed since departure.
+         */
+        if (s_timer_state == CYCLE_TIMER_DONE)
+        {
+            display_ms = s_last_cycle_time_ms;
+        }
+        else if (s_timer_state == CYCLE_TIMER_RUNNING)
+        {
+            elapsed_ms =
+                (uint32_t)(HAL_GetTick() - s_timer_start_ms);
+            display_ms = elapsed_ms;
+        }
+        else
+        {
+            display_ms = 0U;
+        }
+
+        /*
+         * Convert ms to seconds × 10.
+         * e.g. 12345 ms → 123 tenths → 12.3 sec
+         */
+        {
+            uint32_t tenths = display_ms / 100U;
+            uint32_t sec    = tenths / 10U;
+
+            d0 = (uint8_t)((sec / 10U) % 10U);   /* tens  */
+            d1 = (uint8_t)(sec % 10U);            /* ones  */
+            d2 = (uint8_t)(tenths % 10U);         /* tenth */
+        }
+
+        /* Draw the three large digits. */
+        BallTest_DrawLargeTime(d0, d1, d2);
+
+        /* Top-left corner: cycle count. */
         (void)snprintf(line, sizeof(line),
-            "3PH P%u %s",
-            (unsigned int)s_cycle_phase,
-            (s_cycle_hold[s_cycle_phase] != 0U)
-                ? "HOLD"
-                : "BOUNCE");
+            "#%lu",
+            (unsigned long)s_cycle_count);
+        BSP_Oled_DrawString(0U, 0U, line);
+
+        /* Top-right: state indicator. */
+        if (s_timer_state == CYCLE_TIMER_RUNNING)
+        {
+            BSP_Oled_DrawString(100U, 0U, "RUN");
+        }
+        else if (s_timer_state == CYCLE_TIMER_DONE)
+        {
+            BSP_Oled_DrawString(100U, 0U, "DONE");
+        }
+        else
+        {
+            BSP_Oled_DrawString(100U, 0U, "RDY");
+        }
+
+        /* Bottom: stop hint. */
+        BSP_Oled_DrawString(36U, 7U, "K0 STOP");
     }
     else
     {
+        /* Original detail display for A-B HOLD strategy. */
         (void)snprintf(line, sizeof(line),
             "A-B HOLD");
+        BSP_Oled_DrawString(0U, 0U, line);
+
+        (void)snprintf(line, sizeof(line),
+            "CX=%-5ld T=%-5ld",
+            (long)control.center_x,
+            (long)control.target_x);
+        BSP_Oled_DrawString(0U, 2U, line);
+
+        (void)snprintf(line, sizeof(line),
+            "E=%-4ld S=%-4ld %s",
+            (long)control.error,
+            (long)control.speed,
+            BallBalanceControl_ModeName(control.mode));
+        BSP_Oled_DrawString(0U, 4U, line);
+
+        (void)snprintf(line, sizeof(line),
+            "PLS=%-4u K0:STOP",
+            (unsigned int)control.servo_pulse_us);
+        BSP_Oled_DrawString(0U, 6U, line);
     }
-    BSP_Oled_DrawString(0U, 0U, line);
-
-    /* Page 2: CX + TARGET */
-    (void)snprintf(line, sizeof(line),
-        "CX=%-5ld T=%-5ld",
-        (long)control.center_x,
-        (long)control.target_x);
-    BSP_Oled_DrawString(0U, 2U, line);
-
-    /* Page 4: ERR + SPD + MODE */
-    (void)snprintf(line, sizeof(line),
-        "E=%-4ld S=%-4ld %s",
-        (long)control.error,
-        (long)control.speed,
-        BallBalanceControl_ModeName(control.mode));
-    BSP_Oled_DrawString(0U, 4U, line);
-
-    /* Page 6: PULSE + stop hint */
-    (void)snprintf(line, sizeof(line),
-        "PLS=%-4u K0:STOP",
-        (unsigned int)control.servo_pulse_us);
-    BSP_Oled_DrawString(0U, 6U, line);
 }
 
 /*
@@ -395,6 +622,12 @@ static void BallTest_ResetStrategy(void)
 
     s_cycle_phase = 0U;
     s_cycle_start_ms = 0U;
+    s_cycle_phase_prev = 0U;
+
+    s_timer_state = CYCLE_TIMER_IDLE;
+    s_timer_start_ms = 0U;
+    s_last_cycle_time_ms = 0U;
+    s_cycle_count = 0U;
 
     /* Default brake gain. */
     (void)BallBalanceControl_SetBrakeGain(
@@ -639,6 +872,79 @@ void Test_BallBalance_Update(void)
                 }
 
                 Test_BallBalance_PrintEvent(&control);
+
+                /*
+                 * 3-phase cycle timer: 0cm departure → -5cm arrival.
+                 */
+                if (s_strategy == BALL_STRATEGY_3PHASE)
+                {
+                    uint8_t phase = s_cycle_phase;
+
+                    /* Detect phase 0 → 1 transition. */
+                    if ((s_cycle_phase_prev == 0U) &&
+                        (phase == 1U) &&
+                        (s_timer_state == CYCLE_TIMER_IDLE))
+                    {
+                        s_timer_start_ms = now_ms;
+                        s_timer_state = CYCLE_TIMER_RUNNING;
+                        (void)BSP_Debug_Printf(
+                            "BALL_BAL,TIMER,START,"
+                            "CYCLE=%lu\r\n",
+                            (unsigned long)s_cycle_count);
+                    }
+
+                    /*
+                     * Detect arrival at -5cm ± 1cm:
+                     * phase == 2, HOLD mode, cx within
+                     * 43 px of 447 (±1 cm).
+                     */
+                    if ((phase == 2U) &&
+                        (s_timer_state ==
+                         CYCLE_TIMER_RUNNING) &&
+                        (control.mode ==
+                         BALL_BALANCE_MODE_HOLD))
+                    {
+                        int32_t dist;
+
+                        dist = Test_BallBalance_AbsI32(
+                            (int32_t)control.center_x -
+                            (int32_t)BALL_BALANCE_TARGET_CX_N5);
+
+                        if (dist <= 43)
+                        {
+                            s_last_cycle_time_ms =
+                                (uint32_t)(now_ms -
+                                           s_timer_start_ms);
+                            s_cycle_count++;
+                            s_timer_state =
+                                CYCLE_TIMER_DONE;
+
+                            (void)BSP_Debug_Printf(
+                                "BALL_BAL,TIMER,STOP,"
+                                "CYCLE=%lu,"
+                                "TIME_MS=%lu,"
+                                "CX=%ld\r\n",
+                                (unsigned long)s_cycle_count,
+                                (unsigned long)
+                                    s_last_cycle_time_ms,
+                                (long)control.center_x);
+                        }
+                    }
+
+                    /*
+                     * Reset for next cycle when phase
+                     * returns to 0.
+                     */
+                    if ((s_cycle_phase_prev == 2U) &&
+                        (phase == 0U) &&
+                        (s_timer_state ==
+                         CYCLE_TIMER_DONE))
+                    {
+                        s_timer_state = CYCLE_TIMER_IDLE;
+                    }
+
+                    s_cycle_phase_prev = phase;
+                }
             }
 
             /*
