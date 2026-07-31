@@ -98,6 +98,8 @@ void AppTaskManager_Update(void)
         return;
     }
 
+    AppTaskPort_ProcessInputs();
+
     now_ms = HAL_GetTick();
     s_status.update_count++;
 

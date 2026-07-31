@@ -216,11 +216,10 @@ bool Test_LineFollowDrive_Init(void)
     (void)BSP_Debug_Printf(
         "LFD,CFG=BASE_360_TO_120,MAX=500,"
         "KP_Q10=%ld,KD_Q10=%ld,MEDIAN=3,DB=500,"
-        "CENTER_MS=%lu,LOST=%lu,BLACK=%lu,"
+        "START=ANY_LINE,LOST=%lu,BLACK=%lu,"
         "REVERSE=0,PROFILE=BASE_S_CURVE_FAST_TURN\r\n",
         (long)LINE_FOLLOW_CONTROL_KP_Q10,
         (long)LINE_FOLLOW_CONTROL_KD_Q10,
-        (unsigned long)LINE_FOLLOW_CONTROL_START_CONFIRM_MS,
         (unsigned long)LINE_FOLLOW_CONTROL_LOST_TIMEOUT_MS,
         (unsigned long)LINE_FOLLOW_CONTROL_ALL_BLACK_TIMEOUT_MS);
 

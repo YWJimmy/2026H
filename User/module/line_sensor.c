@@ -197,6 +197,17 @@ bool LineSensor_Stop(void)
     return result;
 }
 
+void LineSensor_DiscardFrame(void)
+{
+    /*
+     * Keep the continuously running backend and its sequence baseline.
+     * The next published frame must therefore come from a response received
+     * after this call instead of replaying the pre-start frame.
+     */
+    s_has_frame = false;
+    memset(&s_frame, 0, sizeof(s_frame));
+}
+
 bool LineSensor_Update(void)
 {
     LineSensorFrame_t next_frame;

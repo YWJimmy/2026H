@@ -13,7 +13,6 @@ static bool s_running = false;
 static bool s_stopping = false;
 static bool s_has_previous_normal_error = false;
 static bool s_has_normal_direction = false;
-static bool s_center_candidate = false;
 
 static int16_t s_previous_normal_error = 0;
 static int16_t s_error_history[LINE_FOLLOW_CONTROL_ERROR_MEDIAN_WINDOW];
@@ -27,7 +26,6 @@ static int32_t s_min_base_speed_mm_s =
     LINE_FOLLOW_CONTROL_MIN_BASE_SPEED_MM_S;
 
 static uint32_t s_state_start_ms = 0U;
-static uint32_t s_center_candidate_start_ms = 0U;
 static uint32_t s_last_normal_update_ms = 0U;
 
 static LineFollowControlStatus_t s_status;
@@ -318,59 +316,7 @@ static void LineFollowControl_ResetPd(void)
 
 static void LineFollowControl_ResetStartupGate(void)
 {
-    s_center_candidate = false;
-    s_center_candidate_start_ms = 0U;
     s_status.center_confirmed_ms = 0U;
-}
-
-static bool LineFollowControl_HandleWaitingLine(
-    int16_t filtered_error,
-    uint32_t now_ms)
-{
-    uint32_t centered_ms;
-
-    LineFollowControl_EnterMode(
-        LINE_FOLLOW_CONTROL_MODE_WAITING_LINE,
-        now_ms);
-
-    if (LineFollowControl_AbsI32((int32_t)filtered_error) <=
-        LINE_FOLLOW_CONTROL_START_MAX_ERROR)
-    {
-        if (!s_center_candidate)
-        {
-            s_center_candidate = true;
-            s_center_candidate_start_ms = now_ms;
-        }
-
-        centered_ms =
-            (uint32_t)(now_ms - s_center_candidate_start_ms);
-        if (centered_ms > LINE_FOLLOW_CONTROL_START_CONFIRM_MS)
-        {
-            centered_ms = LINE_FOLLOW_CONTROL_START_CONFIRM_MS;
-        }
-        s_status.center_confirmed_ms = centered_ms;
-    }
-    else
-    {
-        LineFollowControl_ResetStartupGate();
-    }
-
-    if ((!s_center_candidate) ||
-        (s_status.center_confirmed_ms <
-         LINE_FOLLOW_CONTROL_START_CONFIRM_MS))
-    {
-        s_status.correction_target_mm_s = 0;
-        return LineFollowControl_SetBaseTurnTargets(0, 0);
-    }
-
-    LineFollowControl_EnterMode(
-        LINE_FOLLOW_CONTROL_MODE_NORMAL,
-        now_ms);
-    s_has_previous_normal_error = true;
-    s_previous_normal_error = filtered_error;
-    s_last_normal_update_ms = now_ms;
-    s_correction_ramped_mm_s = 0;
-    return true;
 }
 
 static bool LineFollowControl_HandleNormal(
@@ -393,17 +339,11 @@ static bool LineFollowControl_HandleNormal(
 
     if (s_status.mode == LINE_FOLLOW_CONTROL_MODE_WAITING_LINE)
     {
-        if (!LineFollowControl_HandleWaitingLine(
-                filtered_error,
-                now_ms))
-        {
-            return false;
-        }
-
-        if (s_status.mode == LINE_FOLLOW_CONTROL_MODE_WAITING_LINE)
-        {
-            return true;
-        }
+        /* Any valid non-empty line starts control immediately. */
+        LineFollowControl_ResetStartupGate();
+        LineFollowControl_EnterMode(
+            LINE_FOLLOW_CONTROL_MODE_NORMAL,
+            now_ms);
     }
     else
     {

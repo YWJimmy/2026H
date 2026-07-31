@@ -31,6 +31,7 @@ bool LineSensor_Init(void);
 bool LineSensor_Start(void);
 bool LineSensor_Stop(void);
 bool LineSensor_Update(void);
+void LineSensor_DiscardFrame(void);
 
 bool LineSensor_IsInitialized(void);
 bool LineSensor_IsRunning(void);

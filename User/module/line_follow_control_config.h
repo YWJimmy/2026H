@@ -29,9 +29,7 @@
 /* 转向修正先经过快速限速率，避免离散误差直接使差速反向跳变。 */
 #define LINE_FOLLOW_CONTROL_CORRECTION_SLEW_MM_S2    ((int32_t)5000)
 
-/* 启动后必须确认黑线在中心附近，防止一按键就冲出黑线。 */
-#define LINE_FOLLOW_CONTROL_START_MAX_ERROR          ((int32_t)1000)
-#define LINE_FOLLOW_CONTROL_START_CONFIRM_MS         ((uint32_t)80U)
+/* 启动后收到任意有效非空黑线帧即直接进入巡线，不要求黑线居中。 */
 
 /* 丢线搜索降低速度并适当延长恢复窗口。 */
 #define LINE_FOLLOW_CONTROL_LOST_SEARCH_SPEED_MM_S   ((int32_t)100)

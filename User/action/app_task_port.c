@@ -4,6 +4,7 @@
 #include "bsp_servo.h"
 #include "chassis.h"
 #include "line_follow_control.h"
+#include "line_sensor.h"
 #include "task2_lap_stop.h"
 
 static bool s_initialized = false;
@@ -52,6 +53,14 @@ bool AppTaskPort_Start(
         s_fault_detail = Task2LapStop_GetFaultDetail();
     }
     return s_active;
+}
+
+void AppTaskPort_ProcessInputs(void)
+{
+    if (s_initialized && LineSensor_IsRunning())
+    {
+        (void)LineSensor_Update();
+    }
 }
 
 AppTaskPortResult_t AppTaskPort_Update(

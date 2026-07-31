@@ -29,6 +29,9 @@ bool AppTaskPort_Start(
     TaskMenuTask_t task,
     uint32_t start_timestamp_ms);
 
+/* Keep input devices serviced in every task-manager state. */
+void AppTaskPort_ProcessInputs(void);
+
 AppTaskPortResult_t AppTaskPort_Update(
     TaskMenuTask_t task,
     uint32_t now_ms);
