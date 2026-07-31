@@ -28,6 +28,7 @@ static uint32_t s_elapsed_ms = 0U;
 static uint32_t s_distance_mm = 0U;
 static uint32_t s_warning_mask = 0U;
 static uint32_t s_fault_code = 0U;
+static uint32_t s_fault_detail = 0U;
 
 static uint32_t s_last_render_ms = 0U;
 static uint32_t s_last_render_decisecond = 0U;
@@ -324,6 +325,8 @@ static void TaskMenu_RenderFault(void)
     BSP_Oled_DrawString(0U, 2U, s_fault_name);
     BSP_Oled_DrawString(0U, 4U, "CODE:");
     BSP_Oled_DrawU32(36U, 4U, s_fault_code);
+    BSP_Oled_DrawString(0U, 6U, "DETAIL:");
+    BSP_Oled_DrawU32(42U, 6U, s_fault_detail);
     BSP_Oled_DrawString(0U, 7U, "K0:RESET");
 }
 
@@ -387,6 +390,7 @@ bool TaskMenuUi_Init(void)
     s_distance_mm = 0U;
     s_warning_mask = 0U;
     s_fault_code = 0U;
+    s_fault_detail = 0U;
 
     s_selection_change_count = 0U;
     s_start_request_count = 0U;
@@ -600,10 +604,12 @@ void TaskMenuUi_SetStatusText(
 
 void TaskMenuUi_SetFault(
     uint32_t fault_code,
+    uint32_t fault_detail,
     const char *fault_name)
 {
     TaskMenu_ClearRequests();
     s_fault_code = fault_code;
+    s_fault_detail = fault_detail;
     TaskMenu_CopyText(
         s_fault_name,
         fault_name);
@@ -698,6 +704,7 @@ bool TaskMenuUi_GetStatus(
     status->distance_mm = s_distance_mm;
     status->warning_mask = s_warning_mask;
     status->fault_code = s_fault_code;
+    status->fault_detail = s_fault_detail;
 
     status->selection_change_count =
         s_selection_change_count;

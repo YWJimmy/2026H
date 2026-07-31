@@ -177,6 +177,7 @@ static void MainApp_EnterFault(
     {
         TaskMenuUi_SetFault(
             (uint32_t)code,
+            detail,
             AppFault_Name(code));
     }
     else if (s_oled_ready)
@@ -213,6 +214,20 @@ static void MainApp_UpdateTaskStatus(void)
 
     TaskMenuUi_SetStatusText(
         AppTaskManager_GetPhaseText());
+}
+
+static uint32_t MainApp_GetTaskFaultDetail(
+    uint32_t fallback_detail)
+{
+    AppTaskManagerStatus_t task_status;
+
+    if (AppTaskManager_GetStatus(&task_status) &&
+        (task_status.fault_detail != 0U))
+    {
+        return task_status.fault_detail;
+    }
+
+    return fallback_detail;
 }
 
 static void MainApp_UpdateDistance(void)
@@ -411,11 +426,6 @@ void MainApp_Update(void)
         BSP_Key_Process();
     }
 
-    if (s_ui_ready)
-    {
-        TaskMenuUi_Process();
-    }
-
     if (s_task_manager_ready)
     {
         AppTaskManager_Update();
@@ -562,7 +572,7 @@ void MainApp_Update(void)
             {
                 MainApp_EnterFault(
                     APP_FAULT_TASK_RUNTIME,
-                    2U);
+                    MainApp_GetTaskFaultDetail(2U));
             }
             else if (AppTaskManager_IsRunning())
             {
@@ -600,7 +610,7 @@ void MainApp_Update(void)
             {
                 MainApp_EnterFault(
                     APP_FAULT_TASK_RUNTIME,
-                    4U);
+                    MainApp_GetTaskFaultDetail(4U));
             }
             else if (AppTaskManager_GetStatus(
                          &task_status) &&
@@ -626,7 +636,7 @@ void MainApp_Update(void)
             {
                 MainApp_EnterFault(
                     APP_FAULT_TASK_STOP_TIMEOUT,
-                    0U);
+                    MainApp_GetTaskFaultDetail(1U));
             }
             else if (AppTaskManager_IsFinished())
             {
@@ -681,6 +691,12 @@ void MainApp_Update(void)
 
     TaskMenuUi_SetWarningMask(
         s_status.warning_mask);
+
+    /* Render after this cycle's time, distance and state have been updated. */
+    if (s_ui_ready)
+    {
+        TaskMenuUi_Process();
+    }
 
     MainApp_LogStateIfChanged();
     MainApp_ReportPeriodic(now_ms);

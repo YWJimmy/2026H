@@ -41,6 +41,7 @@ typedef struct
     uint32_t distance_mm;
     uint32_t warning_mask;
     uint32_t fault_code;
+    uint32_t fault_detail;
 
     uint32_t selection_change_count;
     uint32_t start_request_count;
@@ -74,6 +75,7 @@ void TaskMenuUi_SetStatusText(const char *text);
 
 void TaskMenuUi_SetFault(
     uint32_t fault_code,
+    uint32_t fault_detail,
     const char *fault_name);
 
 bool TaskMenuUi_TakeStartRequest(

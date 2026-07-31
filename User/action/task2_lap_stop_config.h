@@ -5,15 +5,12 @@
 
 #include "app_config.h"
 
-#define TASK2_LINE_ENABLE_DISTANCE_MM          ((uint32_t)5000U)
 #define TASK2_PREDECEL_DISTANCE_MM             ((uint32_t)5800U)
-#define TASK2_PREDECEL_RAMP_DISTANCE_MM        ((uint32_t)500U)
-#define TASK2_PREDECEL_CENTER_SPEED_MM_S       ((int32_t)180)
-#define TASK2_PREDECEL_MIN_SPEED_MM_S          ((int32_t)120)
+#define TASK2_PREDECEL_CENTER_SPEED_MM_S       ((int32_t)220)
+#define TASK2_PREDECEL_MIN_SPEED_MM_S          ((int32_t)220)
 
-/* bit2～bit5 为中间四路；必须连续成立一段时间。 */
+/* 5.8 m 开始减速并同步搜索；bit2～bit5 必须连续为黑一段时间。 */
 #define TASK2_A_LINE_CENTER_MASK               ((uint8_t)0x3CU)
-#define TASK2_A_LINE_NARROW_MAX_COUNT          ((uint8_t)2U)
 #define TASK2_A_LINE_CONFIRM_MS                ((uint32_t)50U)
 
 #define TASK2_SENSOR_FORWARD_OFFSET_MM         \
