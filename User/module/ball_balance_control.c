@@ -169,9 +169,7 @@ static int32_t BallBalance_CalculateControlDelta(void)
         ((s_status.error > 0) && (s_status.speed < 0)) ||
         ((s_status.error < 0) && (s_status.speed > 0));
 
-    if (moving_to_target &&
-        (error_abs <
-         (speed_abs * BALL_BALANCE_BRAKE_DISTANCE_GAIN)))
+    if (moving_to_target)
     {
         int32_t brake =
             BALL_BALANCE_BRAKE_BASE_US +
@@ -184,7 +182,21 @@ static int32_t BallBalance_CalculateControlDelta(void)
             brake = BALL_BALANCE_BRAKE_MAX_US;
         }
 
-        s_status.braking = true;
+        /*
+         * 217e50b continuously damps motion toward the target.
+         * Far from the target it uses half braking force; inside the
+         * speed-dependent braking distance it uses full force.
+         */
+        if (error_abs >
+            (speed_abs * BALL_BALANCE_BRAKE_DISTANCE_GAIN))
+        {
+            brake = (brake + 1) / 2;
+            s_status.braking = false;
+        }
+        else
+        {
+            s_status.braking = true;
+        }
 
         /*
          * 钢球向右运动时向左制动；
@@ -278,7 +290,8 @@ static bool BallBalance_ProcessFoundTarget(uint16_t center_x)
         (int32_t)BALL_BALANCE_SERVO_CENTER_US + delta;
     clamped_pulse = BallBalance_ClampPulse(
         raw_pulse,
-        s_status.braking);
+        s_status.braking ||
+        (s_status.stuck_boost_us > 0U));
 
     s_status.mode = s_status.braking
         ? BALL_BALANCE_MODE_BRAKE
