@@ -36,6 +36,9 @@ AppTaskPortResult_t AppTaskPort_Update(
     TaskMenuTask_t task,
     uint32_t now_ms);
 
+/* Continue post-result actions such as ball position holding. */
+bool AppTaskPort_Maintain(uint32_t now_ms);
+
 bool AppTaskPort_RequestStop(
     TaskMenuTask_t task);
 

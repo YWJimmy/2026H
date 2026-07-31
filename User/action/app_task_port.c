@@ -1,11 +1,12 @@
 #include "app_task_port.h"
 
-#include "ball_balance_control.h"
+#include "ball_position_action.h"
 #include "bsp_servo.h"
 #include "chassis.h"
 #include "line_follow_control.h"
 #include "line_sensor.h"
 #include "task2_lap_stop.h"
+#include "task3_ball_sequence.h"
 #include "task4_ab_hold.h"
 #include "task5_lap_hold.h"
 #include "task6_lap_target.h"
@@ -23,9 +24,19 @@ bool AppTaskPort_Init(void)
     s_task = TASK_MENU_TASK_2_LAP_STOP;
     s_fault_detail = 0U;
 
+    if (!BallPositionAction_Init())
+    {
+        s_fault_detail = 30U;
+        return false;
+    }
     if (!Task2LapStop_Init())
     {
         s_fault_detail = Task2LapStop_GetFaultDetail();
+        return false;
+    }
+    if (!Task3BallSequence_Init())
+    {
+        s_fault_detail = Task3BallSequence_GetFaultDetail();
         return false;
     }
     if (!Task4AbHold_Init())
@@ -66,6 +77,16 @@ bool AppTaskPort_Start(
         if (!s_active)
         {
             s_fault_detail = Task2LapStop_GetFaultDetail();
+        }
+        return s_active;
+    }
+
+    if (task == TASK_MENU_TASK_3_BALL_SEQUENCE)
+    {
+        s_active = Task3BallSequence_Start(start_timestamp_ms);
+        if (!s_active)
+        {
+            s_fault_detail = Task3BallSequence_GetFaultDetail();
         }
         return s_active;
     }
@@ -130,6 +151,17 @@ AppTaskPortResult_t AppTaskPort_Update(
         {
             return APP_TASK_PORT_RESULT_FINISHED;
         }
+        if ((task == TASK_MENU_TASK_3_BALL_SEQUENCE) &&
+            Task3BallSequence_IsStopped())
+        {
+            if (!Task3BallSequence_Maintain(now_ms))
+            {
+                s_fault_detail =
+                    Task3BallSequence_GetFaultDetail();
+                return APP_TASK_PORT_RESULT_FAULT;
+            }
+            return APP_TASK_PORT_RESULT_FINISHED;
+        }
         if ((task == TASK_MENU_TASK_4_AB_HOLD) &&
             Task4AbHold_IsStopped())
         {
@@ -160,6 +192,23 @@ AppTaskPortResult_t AppTaskPort_Update(
         if (result == TASK2_LAP_STOP_RESULT_FAULT)
         {
             s_fault_detail = Task2LapStop_GetFaultDetail();
+            return APP_TASK_PORT_RESULT_FAULT;
+        }
+        return APP_TASK_PORT_RESULT_RUNNING;
+    }
+
+    if (task == TASK_MENU_TASK_3_BALL_SEQUENCE)
+    {
+        Task3BallSequenceResult_t result =
+            Task3BallSequence_Update(now_ms);
+
+        if (result == TASK3_BALL_SEQUENCE_RESULT_FINISHED)
+        {
+            return APP_TASK_PORT_RESULT_FINISHED;
+        }
+        if (result == TASK3_BALL_SEQUENCE_RESULT_FAULT)
+        {
+            s_fault_detail = Task3BallSequence_GetFaultDetail();
             return APP_TASK_PORT_RESULT_FAULT;
         }
         return APP_TASK_PORT_RESULT_RUNNING;
@@ -220,6 +269,21 @@ AppTaskPortResult_t AppTaskPort_Update(
     return APP_TASK_PORT_RESULT_FAULT;
 }
 
+bool AppTaskPort_Maintain(uint32_t now_ms)
+{
+    if (!s_initialized)
+    {
+        return false;
+    }
+    if ((s_task == TASK_MENU_TASK_3_BALL_SEQUENCE) &&
+        !Task3BallSequence_Maintain(now_ms))
+    {
+        s_fault_detail = Task3BallSequence_GetFaultDetail();
+        return false;
+    }
+    return true;
+}
+
 bool AppTaskPort_RequestStop(
     TaskMenuTask_t task)
 {
@@ -233,6 +297,12 @@ bool AppTaskPort_RequestStop(
         !Task2LapStop_RequestStop())
     {
         s_fault_detail = Task2LapStop_GetFaultDetail();
+        return false;
+    }
+    if ((task == TASK_MENU_TASK_3_BALL_SEQUENCE) &&
+        !Task3BallSequence_RequestStop())
+    {
+        s_fault_detail = Task3BallSequence_GetFaultDetail();
         return false;
     }
     if ((task == TASK_MENU_TASK_4_AB_HOLD) &&
@@ -255,6 +325,7 @@ bool AppTaskPort_RequestStop(
     }
     if ((task != TASK_MENU_TASK_2_LAP_STOP) &&
         (task != TASK_MENU_TASK_4_AB_HOLD) &&
+        (task != TASK_MENU_TASK_3_BALL_SEQUENCE) &&
         (task != TASK_MENU_TASK_5_LAP_HOLD) &&
         (task != TASK_MENU_TASK_6_LAP_TARGET))
     {
@@ -264,6 +335,8 @@ bool AppTaskPort_RequestStop(
 
     if (((task == TASK_MENU_TASK_2_LAP_STOP) &&
          Task2LapStop_IsStopped()) ||
+        ((task == TASK_MENU_TASK_3_BALL_SEQUENCE) &&
+         Task3BallSequence_IsStopped()) ||
         ((task == TASK_MENU_TASK_4_AB_HOLD) &&
          Task4AbHold_IsStopped()) ||
         ((task == TASK_MENU_TASK_5_LAP_HOLD) &&
@@ -287,6 +360,8 @@ bool AppTaskPort_IsStopped(
 
     if (((task == TASK_MENU_TASK_2_LAP_STOP) &&
          Task2LapStop_IsStopped()) ||
+        ((task == TASK_MENU_TASK_3_BALL_SEQUENCE) &&
+         Task3BallSequence_IsStopped()) ||
         ((task == TASK_MENU_TASK_4_AB_HOLD) &&
          Task4AbHold_IsStopped()) ||
         ((task == TASK_MENU_TASK_5_LAP_HOLD) &&
@@ -303,6 +378,7 @@ void AppTaskPort_ForceSafeStop(void)
 {
     s_active = false;
     Task2LapStop_ForceSafeStop();
+    Task3BallSequence_ForceSafeStop();
     Task4AbHold_ForceSafeStop();
     Task5LapHold_ForceSafeStop();
     Task6LapTarget_ForceSafeStop();
@@ -312,10 +388,7 @@ void AppTaskPort_ForceSafeStop(void)
         LineFollowControl_Shutdown();
     }
 
-    if (BallBalanceControl_IsInitialized())
-    {
-        BallBalanceControl_Stop();
-    }
+    BallPositionAction_ForceSafeStop();
 
     if (Chassis_IsInitialized())
     {
@@ -342,6 +415,10 @@ const char *AppTaskPort_GetPhaseText(void)
     {
         return Task2LapStop_GetPhaseText();
     }
+    if (s_task == TASK_MENU_TASK_3_BALL_SEQUENCE)
+    {
+        return Task3BallSequence_GetPhaseText();
+    }
     if (s_task == TASK_MENU_TASK_4_AB_HOLD)
     {
         return Task4AbHold_GetPhaseText();
@@ -365,6 +442,12 @@ bool AppTaskPort_GetElapsedMs(
     if ((!s_initialized) || (task != s_task))
     {
         return false;
+    }
+    if (task == TASK_MENU_TASK_3_BALL_SEQUENCE)
+    {
+        return Task3BallSequence_GetElapsedMs(
+            now_ms,
+            elapsed_ms);
     }
     if (task == TASK_MENU_TASK_4_AB_HOLD)
     {

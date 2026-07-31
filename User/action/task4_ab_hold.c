@@ -1,6 +1,6 @@
 #include "task4_ab_hold.h"
 
-#include "ball_balance_control.h"
+#include "ball_position_action.h"
 #include "bsp_debug_uart.h"
 #include "chassis.h"
 #include "distance_tracker.h"
@@ -9,7 +9,6 @@
 #include "line_follow_control_config.h"
 #include "line_sensor.h"
 #include "task4_ab_hold_config.h"
-#include "vision.h"
 
 typedef enum
 {
@@ -39,8 +38,7 @@ static LineFollowResult_t s_line_result;
 static LineFollowControlStatus_t s_line_control;
 static DistanceTrackerStatus_t s_distance;
 static ChassisStatus_t s_chassis;
-static VisionStatus_t s_vision;
-static BallBalanceControlStatus_t s_ball;
+static BallPositionActionStatus_t s_ball;
 
 static Task4AbHoldResult_t Task4_Fault(uint32_t detail)
 {
@@ -48,23 +46,18 @@ static Task4AbHoldResult_t Task4_Fault(uint32_t detail)
     s_state = TASK4_STATE_FAULT;
     LineFollowControl_Stop(
         LINE_FOLLOW_CONTROL_STOP_COMMAND_ERROR);
-    BallBalanceControl_Stop();
-    Vision_Stop();
+    BallPositionAction_ForceSafeStop();
     return TASK4_AB_HOLD_RESULT_FAULT;
 }
 
-static bool Task4_UpdateBall(void)
+static bool Task4_UpdateBall(uint32_t now_ms)
 {
-    Vision_Update();
-    if (!Vision_GetStatus(&s_vision))
+    if (BallPositionAction_Update(now_ms) ==
+        BALL_POSITION_ACTION_RESULT_FAULT)
     {
         return false;
     }
-    if (!BallBalanceControl_Update(&s_vision))
-    {
-        return false;
-    }
-    return BallBalanceControl_GetStatus(&s_ball);
+    return BallPositionAction_GetStatus(&s_ball);
 }
 
 static bool Task4_UpdateLine(void)
@@ -128,9 +121,9 @@ static void Task4_Report(uint32_t now_ms)
         "T4BALL,CX=%ld,TARGET=%ld,ERR=%ld,SPD=%ld,MODE=%s,PULSE=%u,V=%u\r\n",
         (long)s_ball.center_x,
         (long)s_ball.target_x,
-        (long)s_ball.error,
-        (long)s_ball.speed,
-        BallBalanceControl_ModeName(s_ball.mode),
+        (long)s_ball.error_px,
+        (long)s_ball.filtered_speed_px,
+        BallPositionAction_StateName(s_ball.state),
         (unsigned int)s_ball.servo_pulse_us,
         s_ball.vision_data_valid ? 1U : 0U);
 }
@@ -164,6 +157,8 @@ bool Task4AbHold_Init(void)
 
 bool Task4AbHold_Start(uint32_t start_timestamp_ms)
 {
+    BallPositionActionCommand_t ball_command;
+
     if ((!s_initialized) ||
         ((s_state != TASK4_STATE_IDLE) &&
          (s_state != TASK4_STATE_FINISHED)))
@@ -194,18 +189,13 @@ bool Task4AbHold_Start(uint32_t start_timestamp_ms)
         s_fault_detail = 6U;
         return false;
     }
-    if (!Vision_Init())
+    BallPositionAction_DefaultCommand(
+        &ball_command,
+        TASK4_BALL_TARGET_X);
+    if (!BallPositionAction_Start(
+            &ball_command,
+            start_timestamp_ms))
     {
-        LineFollowControl_Stop(
-            LINE_FOLLOW_CONTROL_STOP_COMMAND_ERROR);
-        s_fault_detail = 7U;
-        return false;
-    }
-    if (!BallBalanceControl_Init() ||
-        !BallBalanceControl_SetTargetX(
-            TASK4_BALL_TARGET_X))
-    {
-        Vision_Stop();
         LineFollowControl_Stop(
             LINE_FOLLOW_CONTROL_STOP_COMMAND_ERROR);
         s_fault_detail = 8U;
@@ -246,7 +236,7 @@ Task4AbHoldResult_t Task4AbHold_Update(uint32_t now_ms)
     }
 
     if ((s_state != TASK4_STATE_USER_STOPPING) &&
-        !Task4_UpdateBall())
+        !Task4_UpdateBall(now_ms))
     {
         return Task4_Fault(10U);
     }
@@ -343,8 +333,7 @@ bool Task4AbHold_RequestStop(void)
     if (s_state == TASK4_STATE_FINISHED)
     {
         LineFollowControl_Shutdown();
-        BallBalanceControl_Stop();
-        Vision_Stop();
+        BallPositionAction_Stop();
         return true;
     }
     if (s_state == TASK4_STATE_USER_STOPPING)
@@ -364,8 +353,7 @@ bool Task4AbHold_RequestStop(void)
     {
         return false;
     }
-    BallBalanceControl_Stop();
-    Vision_Stop();
+    BallPositionAction_Stop();
     s_state = TASK4_STATE_USER_STOPPING;
     return true;
 }
@@ -384,11 +372,7 @@ void Task4AbHold_ForceSafeStop(void)
     {
         LineFollowControl_Shutdown();
     }
-    if (BallBalanceControl_IsInitialized())
-    {
-        BallBalanceControl_Stop();
-    }
-    Vision_Stop();
+    BallPositionAction_ForceSafeStop();
     s_state = TASK4_STATE_IDLE;
 }
 

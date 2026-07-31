@@ -209,8 +209,21 @@ void AppTaskManager_Update(void)
             }
             break;
 
-        case APP_TASK_MANAGER_IDLE:
         case APP_TASK_MANAGER_FINISHED:
+            if (!AppTaskPort_Maintain(now_ms))
+            {
+                s_status.stop_reason =
+                    APP_TASK_STOP_FAULT;
+                s_status.fault_detail =
+                    AppTaskPort_GetFaultDetail();
+                AppTaskPort_ForceSafeStop();
+                AppTaskManager_SetState(
+                    APP_TASK_MANAGER_FAULT,
+                    now_ms);
+            }
+            break;
+
+        case APP_TASK_MANAGER_IDLE:
         case APP_TASK_MANAGER_FAULT:
         default:
             break;

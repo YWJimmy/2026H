@@ -1,6 +1,6 @@
 #include "task6_lap_target.h"
 
-#include "ball_balance_control.h"
+#include "ball_position_action.h"
 #include "bsp_debug_uart.h"
 #include "chassis.h"
 #include "distance_tracker.h"
@@ -9,7 +9,6 @@
 #include "line_follow_control_config.h"
 #include "line_sensor.h"
 #include "task6_lap_target_config.h"
-#include "vision.h"
 
 typedef enum
 {
@@ -49,8 +48,7 @@ static LineFollowResult_t s_line_result;
 static LineFollowControlStatus_t s_line_control;
 static DistanceTrackerStatus_t s_distance;
 static ChassisStatus_t s_chassis;
-static VisionStatus_t s_vision;
-static BallBalanceControlStatus_t s_ball;
+static BallPositionActionStatus_t s_ball;
 
 static Task6LapTargetResult_t Task6_Fault(uint32_t detail)
 {
@@ -58,23 +56,18 @@ static Task6LapTargetResult_t Task6_Fault(uint32_t detail)
     s_state = TASK6_STATE_FAULT;
     LineFollowControl_Stop(
         LINE_FOLLOW_CONTROL_STOP_COMMAND_ERROR);
-    BallBalanceControl_Stop();
-    Vision_Stop();
+    BallPositionAction_ForceSafeStop();
     return TASK6_LAP_TARGET_RESULT_FAULT;
 }
 
-static bool Task6_UpdateBall(void)
+static bool Task6_UpdateBall(uint32_t now_ms)
 {
-    Vision_Update();
-    if (!Vision_GetStatus(&s_vision))
+    if (BallPositionAction_Update(now_ms) ==
+        BALL_POSITION_ACTION_RESULT_FAULT)
     {
         return false;
     }
-    if (!BallBalanceControl_Update(&s_vision))
-    {
-        return false;
-    }
-    return BallBalanceControl_GetStatus(&s_ball);
+    return BallPositionAction_GetStatus(&s_ball);
 }
 
 static bool Task6_IsParkingLine(uint8_t black_mask)
@@ -182,9 +175,9 @@ static void Task6_Report(uint32_t now_ms)
         "T6BALL,CX=%ld,TARGET=%ld,ERR=%ld,SPD=%ld,MODE=%s,PULSE=%u,V=%u\r\n",
         (long)s_ball.center_x,
         (long)s_ball.target_x,
-        (long)s_ball.error,
-        (long)s_ball.speed,
-        BallBalanceControl_ModeName(s_ball.mode),
+        (long)s_ball.error_px,
+        (long)s_ball.filtered_speed_px,
+        BallPositionAction_StateName(s_ball.state),
         (unsigned int)s_ball.servo_pulse_us,
         s_ball.vision_data_valid ? 1U : 0U);
 }
@@ -218,6 +211,8 @@ bool Task6LapTarget_Init(void)
 
 bool Task6LapTarget_Start(uint32_t start_timestamp_ms)
 {
+    BallPositionActionCommand_t ball_command;
+
     if ((!s_initialized) ||
         ((s_state != TASK6_STATE_IDLE) &&
          (s_state != TASK6_STATE_FINISHED)))
@@ -241,14 +236,14 @@ bool Task6LapTarget_Start(uint32_t start_timestamp_ms)
         s_fault_detail = 5U;
         return false;
     }
-    if (!Vision_Init())
+    BallPositionAction_DefaultCommand(&ball_command, 0);
+    ball_command.capture_current_target = true;
+    ball_command.vision_timeout_ms =
+        TASK6_TARGET_CAPTURE_TIMEOUT_MS;
+    if (!BallPositionAction_Start(
+            &ball_command,
+            start_timestamp_ms))
     {
-        s_fault_detail = 7U;
-        return false;
-    }
-    if (!BallBalanceControl_Init())
-    {
-        Vision_Stop();
         s_fault_detail = 8U;
         return false;
     }
@@ -299,25 +294,14 @@ Task6LapTargetResult_t Task6LapTarget_Update(uint32_t now_ms)
 
     if (s_state == TASK6_STATE_CAPTURE_TARGET)
     {
-        Vision_Update();
-        if (!Vision_GetStatus(&s_vision) ||
-            !BallBalanceControl_GetStatus(&s_ball))
+        if (!Task6_UpdateBall(now_ms))
         {
             return Task6_Fault(10U);
         }
 
-        if (s_vision.data_valid &&
-            s_vision.has_frame &&
-            s_vision.frame.found)
+        if (s_ball.target_locked)
         {
-            s_ball_target_x =
-                (int32_t)s_vision.frame.center_x;
-            if (!BallBalanceControl_SetTargetX(
-                    s_ball_target_x) ||
-                !BallBalanceControl_Update(&s_vision))
-            {
-                return Task6_Fault(11U);
-            }
+            s_ball_target_x = s_ball.target_x;
             if (!LineFollowControl_Start())
             {
                 return Task6_Fault(12U);
@@ -346,7 +330,7 @@ Task6LapTargetResult_t Task6LapTarget_Update(uint32_t now_ms)
     }
 
     if ((s_state != TASK6_STATE_USER_STOPPING) &&
-        !Task6_UpdateBall())
+        !Task6_UpdateBall(now_ms))
     {
         return Task6_Fault(15U);
     }
@@ -493,8 +477,7 @@ bool Task6LapTarget_RequestStop(void)
     if (s_state == TASK6_STATE_FINISHED)
     {
         LineFollowControl_Shutdown();
-        BallBalanceControl_Stop();
-        Vision_Stop();
+        BallPositionAction_Stop();
         return true;
     }
     if (s_state == TASK6_STATE_USER_STOPPING)
@@ -516,8 +499,7 @@ bool Task6LapTarget_RequestStop(void)
     {
         return false;
     }
-    BallBalanceControl_Stop();
-    Vision_Stop();
+    BallPositionAction_Stop();
     s_stop_start_ms = s_last_update_ms;
     s_state = TASK6_STATE_USER_STOPPING;
     return true;
@@ -537,11 +519,7 @@ void Task6LapTarget_ForceSafeStop(void)
     {
         LineFollowControl_Shutdown();
     }
-    if (BallBalanceControl_IsInitialized())
-    {
-        BallBalanceControl_Stop();
-    }
-    Vision_Stop();
+    BallPositionAction_ForceSafeStop();
     s_state = TASK6_STATE_IDLE;
 }
 

@@ -835,9 +835,19 @@
               <FilePath>..\User\action\app_task_port.c</FilePath>
             </File>
             <File>
+              <FileName>ball_position_action.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\action\ball_position_action.c</FilePath>
+            </File>
+            <File>
               <FileName>task2_lap_stop.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\action\task2_lap_stop.c</FilePath>
+            </File>
+            <File>
+              <FileName>task3_ball_sequence.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\action\task3_ball_sequence.c</FilePath>
             </File>
             <File>
               <FileName>task4_ab_hold.c</FileName>
