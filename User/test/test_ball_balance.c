@@ -12,17 +12,24 @@
  * Target ball center X in 1280x960 coordinates.
  * Cyclic: hold at each target for HOLD_MS, then switch.
  */
-#define BALL_TARGET_CX_A        447
-#define BALL_TARGET_CX_B        869
-#define BALL_CYCLE_HOLD_MS      5000U
+/*
+ * Cycle targets: 0cm → +5cm → -5cm → 0cm → repeat
+ * Phase 0: 0cm (653), hold 5s
+ * Phase 1: +5cm (869), no hold
+ * Phase 2: -5cm (447), hold 5s
+ */
+#define BALL_TARGET_CX_0         653
+#define BALL_TARGET_CX_P5        869
+#define BALL_TARGET_CX_N5        447
+#define BALL_CYCLE_HOLD_MS       5000U
 
 /*
  * Servo pulse width limits (us).
  * 1700 = stable/level.
  */
-#define SERVO_CENTER_US         1700U
-#define SERVO_PUSH_MIN_US       1300U
-#define SERVO_PUSH_MAX_US       2000U
+#define SERVO_CENTER_US         1650U
+#define SERVO_PUSH_MIN_US       1550U
+#define SERVO_PUSH_MAX_US       1750U
 #define SERVO_BRAKE_MIN_US      1300U
 #define SERVO_BRAKE_MAX_US      2000U
 
@@ -36,13 +43,14 @@
  * Higher = brake earlier.
  */
 #define BALL_BRAKE_GAIN         5.0f
+#define BALL_BRAKE_GAIN_N5      10.0f
 
 /*
- * Base brake pulse offset from center (us).
- * Actual brake = BASE + |speed| * SPEED_FACTOR.
+ * Brake force = BASE + |speed| * SPEED_FACTOR.
+ * Low base for gentle slow-speed stop; speed factor for fast deceleration.
  */
-#define BALL_BRAKE_BASE_US      200U
-#define BALL_BRAKE_SPEED_FACTOR 1.5f
+#define BALL_BRAKE_BASE_US      60U
+#define BALL_BRAKE_SPEED_FACTOR 4.0f
 
 /*
  * Maximum brake pulse offset (us).
@@ -54,12 +62,12 @@
 #define BALL_STUCK_SPEED_PX     3
 #define BALL_STUCK_WAIT         15
 #define BALL_STUCK_BOOST_US     100U
-#define BALL_STUCK_HOLD          5
+#define BALL_STUCK_HOLD          8
 
 /*
- * Dead zone: |error| <= 15.
+ * Dead zone: |error| <= 40.
  */
-#define BALL_DEADZONE_PX        30
+#define BALL_DEADZONE_PX        40
 
 /*
  * Minimum push step size (us).
@@ -92,8 +100,11 @@ static bool     s_has_target         = false;
 static bool     s_braking            = false;
 static uint32_t s_stuck_counter       = 0U;
 static uint32_t s_stuck_hold_frames    = 0U;
-static uint16_t s_target_cx          = BALL_TARGET_CX_A;
+static uint16_t s_target_cx          = BALL_TARGET_CX_0;
 static uint32_t s_cycle_start_ms     = 0U;
+static uint8_t  s_phase              = 0U;
+static const uint16_t s_cycle_targets[3] = {653, 869, 447};
+static const uint8_t  s_cycle_hold[3]    = {1, 0, 1};
 
 static uint16_t Servo_ClampPulse(int32_t raw, bool braking)
 {
@@ -119,8 +130,9 @@ bool Test_BallBalance_Init(void)
     s_braking           = false;
     s_stuck_counter     = 0U;
     s_stuck_hold_frames = 0U;
-    s_target_cx         = BALL_TARGET_CX_A;
+    s_target_cx         = BALL_TARGET_CX_0;
     s_cycle_start_ms    = 0U;
+    s_phase             = 0U;
 
     if (!BSP_DebugUart_Init())
     {
@@ -128,13 +140,15 @@ bool Test_BallBalance_Init(void)
     }
 
     (void)BSP_Debug_Printf(
-        "BALL_BAL,START,MODE=CYCLE_%u_%u_HOLD_%lums,"
+        "BALL_BAL,START,MODE=CYCLE_0_+5_-5_0,"
+        "T0=%u,TP5=%u,TN5=%u,HOLD_%lums,"
         "DEADZONE=%d,"
         "PUSH_KP=%.2f,BRAKE_GAIN=%.1f,"
         "BRAKE_BASE=%u,SPEED_FACT=%.1f,"
         "LIMS=PUSH_%u_%u_BRAKE_%u_%u\r\n",
-        (unsigned int)BALL_TARGET_CX_A,
-        (unsigned int)BALL_TARGET_CX_B,
+        (unsigned int)BALL_TARGET_CX_0,
+        (unsigned int)BALL_TARGET_CX_P5,
+        (unsigned int)BALL_TARGET_CX_N5,
         (unsigned long)BALL_CYCLE_HOLD_MS,
         BALL_DEADZONE_PX,
         (double)BALL_PUSH_KP,
@@ -251,9 +265,10 @@ void Test_BallBalance_Update(void)
 
                 if (moving_to_target)
                 {
-                    /* Brake distance = how far ahead to start braking */
+                    /* Normal braking (skip in bounce phase 1) */
+                    float brake_gain = (s_phase == 2U) ? BALL_BRAKE_GAIN_N5 : BALL_BRAKE_GAIN;
                     int32_t brake_dist =
-                        (int32_t)((float)abs(s_speed) * BALL_BRAKE_GAIN);
+                        (int32_t)((float)abs(s_speed) * brake_gain);
 
                     if ((int32_t)abs(s_last_error) < brake_dist)
                     {
@@ -285,9 +300,24 @@ void Test_BallBalance_Update(void)
                 }
                 else
                 {
-                    /* Ball stopped or moving away: push toward target */
-                    delta = (int32_t)(BALL_PUSH_KP * (float)s_last_error);
-                    s_braking = false;
+                    /* Ball moving away or stopped */
+                    if (abs(s_speed) > BALL_STUCK_SPEED_PX)
+                    {
+                        /* Moving away: half brake to dampen oscillation */
+                        int32_t brake = (int32_t)BALL_BRAKE_BASE_US / 2 +
+                            (int32_t)((float)abs(s_speed) * BALL_BRAKE_SPEED_FACTOR / 2.0f);
+                        if (s_speed > 0)
+                            delta = -(int32_t)brake;
+                        else
+                            delta = (int32_t)brake;
+                        s_braking = true;
+                    }
+                    else
+                    {
+                        /* Stopped: push toward target */
+                        delta = (int32_t)(BALL_PUSH_KP * (float)s_last_error);
+                        s_braking = false;
+                    }
                 }
 
                 /* Stuck detection: wait N frames, then boost for HOLD frames */
@@ -330,7 +360,9 @@ void Test_BallBalance_Update(void)
                 }
 
                 raw_pulse      = (int32_t)SERVO_CENTER_US + delta;
-                clamped_pulse  = Servo_ClampPulse(raw_pulse, s_braking);
+                /* Use brake limits when braking OR stuck */
+                clamped_pulse  = Servo_ClampPulse(raw_pulse,
+                    s_braking || (s_stuck_hold_frames > 0U));
 
                 if (clamped_pulse != (uint16_t)s_servo_pulse)
                 {
@@ -348,38 +380,44 @@ void Test_BallBalance_Update(void)
         }
     }
 
-    /* ---- cycle: hold at target for HOLD_MS before switching ---- */
+    /* ---- cycle: phase0=0(hold) → phase1=+5(bounce) → phase2=-5(hold) → repeat ---- */
     if (abs(s_last_error) <= BALL_DEADZONE_PX)
     {
-        /* Ball in dead zone: start or continue hold timer */
-        if (s_cycle_start_ms == 0U)
+        bool do_switch = false;
+
+        if (s_cycle_hold[s_phase] == 0U)
         {
-            s_cycle_start_ms = now_ms;
+            /* Bounce phase: switch immediately */
+            do_switch = true;
         }
-        else if ((uint32_t)(now_ms - s_cycle_start_ms) >= BALL_CYCLE_HOLD_MS)
+        else
         {
-            /* Hold time elapsed, switch target */
-            s_cycle_start_ms = 0U;
+            /* Hold phase: wait HOLD_MS */
+            if (s_cycle_start_ms == 0U)
+                s_cycle_start_ms = now_ms;
+            else if ((uint32_t)(now_ms - s_cycle_start_ms) >= BALL_CYCLE_HOLD_MS)
+                do_switch = true;
+        }
+
+        if (do_switch)
+        {
+            s_cycle_start_ms    = 0U;
             s_stuck_counter     = 0U;
             s_stuck_hold_frames = 0U;
 
-            if (s_target_cx == BALL_TARGET_CX_A)
-            {
-                s_target_cx = BALL_TARGET_CX_B;
-            }
-            else
-            {
-                s_target_cx = BALL_TARGET_CX_A;
-            }
+            s_phase = (s_phase + 1U) % 3U;
+            s_target_cx = s_cycle_targets[s_phase];
+            s_last_error = (int32_t)s_target_cx - s_last_cx;
 
             (void)BSP_Debug_Printf(
-                "BALL_BAL,CYCLE,NEW_TARGET=%u\r\n",
+                "BALL_BAL,CYCLE,PHASE=%u,HOLD=%u,TARGET=%u\r\n",
+                (unsigned int)s_phase,
+                (unsigned int)s_cycle_hold[s_phase],
                 (unsigned int)s_target_cx);
         }
     }
     else
     {
-        /* Ball left dead zone: reset hold timer */
         s_cycle_start_ms = 0U;
     }
 
