@@ -16,10 +16,10 @@
 /*
  * NORMAL状态基础速度：
  * 误差接近0时为360 mm/s；
- * |error|达到7000时线性降低到120 mm/s。
+ * |error|达到7000时线性降低到140 mm/s。
  */
 #define LINE_FOLLOW_CONTROL_CENTER_SPEED_MM_S        ((int32_t)360)
-#define LINE_FOLLOW_CONTROL_MIN_BASE_SPEED_MM_S      ((int32_t)120)
+#define LINE_FOLLOW_CONTROL_MIN_BASE_SPEED_MM_S      ((int32_t)140)
 #define LINE_FOLLOW_CONTROL_ERROR_FULL_SCALE         ((int32_t)7000)
 
 /* 巡线过程中禁止反向，目标轮速限制为0～500 mm/s。 */

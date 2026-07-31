@@ -5,18 +5,20 @@
 
 #include "app_config.h"
 
-#define TASK2_LINE_ENABLE_DISTANCE_MM          ((uint32_t)3000U)
+#define TASK2_LINE_ENABLE_DISTANCE_MM          ((uint32_t)5000U)
 #define TASK2_PREDECEL_DISTANCE_MM             ((uint32_t)5800U)
-#define TASK2_PREDECEL_CENTER_SPEED_MM_S       ((int32_t)150)
-#define TASK2_PREDECEL_MIN_SPEED_MM_S          ((int32_t)100)
+#define TASK2_PREDECEL_RAMP_DISTANCE_MM        ((uint32_t)500U)
+#define TASK2_PREDECEL_CENTER_SPEED_MM_S       ((int32_t)180)
+#define TASK2_PREDECEL_MIN_SPEED_MM_S          ((int32_t)120)
 
 /* bit2～bit5 为中间四路；必须连续成立一段时间。 */
 #define TASK2_A_LINE_CENTER_MASK               ((uint8_t)0x3CU)
-#define TASK2_A_LINE_CONFIRM_MS                ((uint32_t)20U)
+#define TASK2_A_LINE_NARROW_MAX_COUNT          ((uint8_t)2U)
+#define TASK2_A_LINE_CONFIRM_MS                ((uint32_t)50U)
 
 #define TASK2_SENSOR_FORWARD_OFFSET_MM         \
     ((uint32_t)APP_ROUTE_SENSOR_FORWARD_OFFSET_MM)
-#define TASK2_STOP_DISTANCE_MARGIN_MM          ((uint32_t)5U)
+#define TASK2_STOP_DISTANCE_MARGIN_MM          ((uint32_t)0U)
 
 #define TASK2_STOP_NOMINAL_DECEL_MM_S2         ((int32_t)60)
 #define TASK2_STOP_MAX_DECEL_MM_S2             ((int32_t)2500)
