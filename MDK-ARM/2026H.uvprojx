@@ -764,6 +764,11 @@
               <FileType>1</FileType>
               <FilePath>..\User\module\ball_balance_control.c</FilePath>
             </File>
+            <File>
+              <FileName>chassis_speed_profile.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\module\chassis_speed_profile.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
