@@ -17,6 +17,7 @@ typedef enum
     LINE_FOLLOW_CONTROL_MODE_NORMAL,
     LINE_FOLLOW_CONTROL_MODE_LOST_SEARCH,
     LINE_FOLLOW_CONTROL_MODE_ALL_BLACK_PASS,
+    LINE_FOLLOW_CONTROL_MODE_STOPPING,
     LINE_FOLLOW_CONTROL_MODE_STOPPED
 } LineFollowControlMode_t;
 
@@ -35,7 +36,9 @@ typedef struct
 {
     bool initialized;
     bool running;
+    bool stopping;
     bool chassis_enabled;
+    bool chassis_motion_stopped;
     bool has_normal_direction;
 
     LineFollowControlMode_t mode;
@@ -60,13 +63,21 @@ typedef struct
 
 bool LineFollowControl_Init(void);
 bool LineFollowControl_Start(void);
+
+/* 普通用户停止：快速限跃度停车。 */
+bool LineFollowControl_RequestStop(
+    LineFollowControlStopReason_t reason);
+
+/* 故障停止：立即锁存急停。 */
 void LineFollowControl_Stop(LineFollowControlStopReason_t reason);
+
 void LineFollowControl_Shutdown(void);
 bool LineFollowControl_Submit(const LineFollowResult_t *result);
 void LineFollowControl_Process(void);
 
 bool LineFollowControl_IsInitialized(void);
 bool LineFollowControl_IsRunning(void);
+bool LineFollowControl_IsStopping(void);
 bool LineFollowControl_GetStatus(LineFollowControlStatus_t *status);
 
 const char *LineFollowControl_ModeName(LineFollowControlMode_t mode);

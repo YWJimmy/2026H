@@ -10,6 +10,7 @@
 
 static bool s_initialized = false;
 static bool s_running = false;
+static bool s_stopping = false;
 static bool s_has_previous_normal_error = false;
 static bool s_has_normal_direction = false;
 
@@ -311,6 +312,7 @@ bool LineFollowControl_Init(void)
 {
     s_initialized = false;
     s_running = false;
+    s_stopping = false;
     s_has_previous_normal_error = false;
     s_has_normal_direction = false;
     s_previous_normal_error = 0;
@@ -330,7 +332,9 @@ bool LineFollowControl_Init(void)
 
     s_initialized = true;
     s_status.initialized = true;
+    s_status.stopping = false;
     s_status.chassis_enabled = Chassis_IsEnabled();
+    s_status.chassis_motion_stopped = Chassis_IsMotionStopped();
 
     return true;
 }
@@ -352,6 +356,7 @@ bool LineFollowControl_Start(void)
     now_ms = HAL_GetTick();
 
     s_running = true;
+    s_stopping = false;
     s_has_previous_normal_error = false;
     s_has_normal_direction = false;
     s_previous_normal_error = 0;
@@ -360,7 +365,9 @@ bool LineFollowControl_Start(void)
     memset(&s_status, 0, sizeof(s_status));
     s_status.initialized = true;
     s_status.running = true;
+    s_status.stopping = false;
     s_status.chassis_enabled = true;
+    s_status.chassis_motion_stopped = true;
     s_status.mode =
         LINE_FOLLOW_CONTROL_MODE_WAITING_LINE;
     s_status.stop_reason =
@@ -381,6 +388,43 @@ bool LineFollowControl_Start(void)
     return true;
 }
 
+bool LineFollowControl_RequestStop(
+    LineFollowControlStopReason_t reason)
+{
+    uint32_t now_ms;
+
+    if ((!s_initialized) || (!s_running))
+    {
+        return false;
+    }
+
+    now_ms = HAL_GetTick();
+    s_running = false;
+    s_stopping = true;
+
+    s_status.running = false;
+    s_status.stopping = true;
+    s_status.mode = LINE_FOLLOW_CONTROL_MODE_STOPPING;
+    s_status.stop_reason = reason;
+    s_status.base_speed_mm_s = 0;
+    s_status.correction_mm_s = 0;
+    s_status.left_target_mm_s = 0;
+    s_status.right_target_mm_s = 0;
+    s_status.timestamp_ms = now_ms;
+    s_state_start_ms = now_ms;
+
+    LineFollowControl_ResetPd();
+
+    if (!Chassis_RequestStop(CHASSIS_STOP_MODE_FAST))
+    {
+        LineFollowControl_Stop(
+            LINE_FOLLOW_CONTROL_STOP_COMMAND_ERROR);
+        return false;
+    }
+
+    return true;
+}
+
 void LineFollowControl_Stop(LineFollowControlStopReason_t reason)
 {
     if (!s_initialized)
@@ -389,7 +433,9 @@ void LineFollowControl_Stop(LineFollowControlStopReason_t reason)
     }
 
     s_running = false;
+    s_stopping = false;
     s_status.running = false;
+    s_status.stopping = false;
     s_status.mode =
         LINE_FOLLOW_CONTROL_MODE_STOPPED;
     s_status.stop_reason = reason;
@@ -401,9 +447,10 @@ void LineFollowControl_Stop(LineFollowControlStopReason_t reason)
 
     LineFollowControl_ResetPd();
 
-    /* 故障与人工停止均绕过斜坡，立即短路刹车。 */
+    /* 故障或二次按键急停绕过规划器，立即短路刹车。 */
     Chassis_Stop();
     s_status.chassis_enabled = Chassis_IsEnabled();
+    s_status.chassis_motion_stopped = true;
 }
 
 void LineFollowControl_Shutdown(void)
@@ -469,26 +516,41 @@ bool LineFollowControl_Submit(
 
 void LineFollowControl_Process(void)
 {
+    uint32_t now_ms;
+
     if (!s_initialized)
     {
         return;
     }
+
+    now_ms = HAL_GetTick();
 
     if (Chassis_IsEnabled())
     {
         (void)Chassis_Update();
     }
 
-    s_status.chassis_enabled =
-        Chassis_IsEnabled();
+    s_status.chassis_enabled = Chassis_IsEnabled();
+    s_status.chassis_motion_stopped =
+        Chassis_IsMotionStopped();
 
     if ((s_status.mode ==
          LINE_FOLLOW_CONTROL_MODE_LOST_SEARCH) ||
         (s_status.mode ==
-         LINE_FOLLOW_CONTROL_MODE_ALL_BLACK_PASS))
+         LINE_FOLLOW_CONTROL_MODE_ALL_BLACK_PASS) ||
+        (s_status.mode ==
+         LINE_FOLLOW_CONTROL_MODE_STOPPING))
     {
         s_status.state_elapsed_ms =
-            (uint32_t)(HAL_GetTick() - s_state_start_ms);
+            (uint32_t)(now_ms - s_state_start_ms);
+    }
+
+    if (s_stopping && Chassis_IsMotionStopped())
+    {
+        s_stopping = false;
+        s_status.stopping = false;
+        s_status.mode = LINE_FOLLOW_CONTROL_MODE_STOPPED;
+        s_status.timestamp_ms = now_ms;
     }
 }
 
@@ -500,6 +562,11 @@ bool LineFollowControl_IsInitialized(void)
 bool LineFollowControl_IsRunning(void)
 {
     return s_initialized && s_running;
+}
+
+bool LineFollowControl_IsStopping(void)
+{
+    return s_initialized && s_stopping;
 }
 
 bool LineFollowControl_GetStatus(
@@ -529,6 +596,8 @@ const char *LineFollowControl_ModeName(
             return "LOST";
         case LINE_FOLLOW_CONTROL_MODE_ALL_BLACK_PASS:
             return "BLACK";
+        case LINE_FOLLOW_CONTROL_MODE_STOPPING:
+            return "STOPPING";
         case LINE_FOLLOW_CONTROL_MODE_STOPPED:
             return "STOP";
         default:

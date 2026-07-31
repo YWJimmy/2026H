@@ -62,13 +62,35 @@ static bool Test_LineFollowDrive_KeyPressed(uint32_t now_ms)
 
 static void Test_LineFollowDrive_ToggleRun(void)
 {
+    LineFollowControlStatus_t control;
+
+    if (!LineFollowControl_GetStatus(&control))
+    {
+        return;
+    }
+
     if (LineFollowControl_IsRunning())
+    {
+        if (!LineFollowControl_RequestStop(
+                LINE_FOLLOW_CONTROL_STOP_USER))
+        {
+            (void)BSP_Debug_Printf(
+                "ERR,LINE_FOLLOW_FAST_STOP\r\n");
+            return;
+        }
+
+        (void)BSP_Debug_Printf(
+            "LFD,EVENT=KEY_FAST_STOP\r\n");
+        return;
+    }
+
+    if (LineFollowControl_IsStopping())
     {
         LineFollowControl_Stop(
             LINE_FOLLOW_CONTROL_STOP_USER);
 
         (void)BSP_Debug_Printf(
-            "LFD,EVENT=KEY_STOP\r\n");
+            "LFD,EVENT=KEY_EMERGENCY_STOP\r\n");
         return;
     }
 
@@ -94,9 +116,10 @@ static void Test_LineFollowDrive_PrintStatus(void)
     }
 
     (void)BSP_Debug_Printf(
-        "LFD,R=%u,M=%s,X=%s,LS=%s,MASK=0x%02X,"
+        "LFD,R=%u,SP=%u,M=%s,X=%s,LS=%s,MASK=0x%02X,"
         "E=%d,DE=%d,B=%ld,C=%ld,T=%ld/%ld,AGE=%lu\r\n",
         control.running ? 1U : 0U,
+        control.stopping ? 1U : 0U,
         LineFollowControl_ModeName(control.mode),
         LineFollowControl_StopReasonName(
             control.stop_reason),
@@ -113,20 +136,25 @@ static void Test_LineFollowDrive_PrintStatus(void)
     if (Chassis_GetStatus(&chassis))
     {
         (void)BSP_Debug_Printf(
-            "LFC,S=%lu,CMD=%ld/%ld,RMP=%ld/%ld,MEA=%ld/%ld,"
-            "PWM=%d/%d,D=%d/%d,A=%u,V=%u,OVR=%lu\r\n",
+            "LFC,S=%lu,MODE=%s,CMD=%ld/%ld,RMP=%ld/%ld,"
+            "MEA=%ld/%ld,F=%ld,T=%ld,AF=%ld,AT=%ld,"
+            "PWM=%d/%d,A=%u,STOP=%u,V=%u,OVR=%lu\r\n",
             (unsigned long)chassis.control_sequence,
+            Chassis_MotionModeName(chassis.motion_mode),
             (long)chassis.left_command_mm_s,
             (long)chassis.right_command_mm_s,
             (long)chassis.left_target_mm_s,
             (long)chassis.right_target_mm_s,
             (long)chassis.left_measured_mm_s,
             (long)chassis.right_measured_mm_s,
+            (long)chassis.forward_target_mm_s,
+            (long)chassis.turn_target_mm_s,
+            (long)chassis.forward_accel_mm_s2,
+            (long)chassis.turn_accel_mm_s2,
             (int)chassis.left_pwm,
             (int)chassis.right_pwm,
-            (int)chassis.left_delta,
-            (int)chassis.right_delta,
             chassis.speed_ramp_active ? 1U : 0U,
+            chassis.motion_stopped ? 1U : 0U,
             chassis.encoder_sample_valid ? 1U : 0U,
             (unsigned long)chassis.timing_overrun_count);
     }
@@ -180,7 +208,7 @@ bool Test_LineFollowDrive_Init(void)
     (void)BSP_Debug_Printf(
         "LFD,CFG=BASE_360_TO_120,MAX=500,"
         "KP_Q10=%ld,KD_Q10=%ld,LOST=%lu,BLACK=%lu,"
-        "REVERSE=0,RAMP=1\r\n",
+        "REVERSE=0,PROFILE=JERK_LIMITED\r\n",
         (long)LINE_FOLLOW_CONTROL_KP_Q10,
         (long)LINE_FOLLOW_CONTROL_KD_Q10,
         (unsigned long)LINE_FOLLOW_CONTROL_LOST_TIMEOUT_MS,

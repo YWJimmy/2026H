@@ -3,6 +3,7 @@
 #include "bsp_encoder.h"
 #include "bsp_motor.h"
 #include "chassis_config.h"
+#include "chassis_speed_profile.h"
 #include "stm32f4xx_hal.h"
 #include "wheel_speed_control.h"
 
@@ -12,18 +13,16 @@
 
 static bool s_initialized = false;
 static bool s_enabled = false;
+static bool s_emergency_latched = false;
 
 static WheelSpeedController_t s_left_controller;
 static WheelSpeedController_t s_right_controller;
+static ChassisSpeedProfile_t s_speed_profile;
+static ChassisSpeedProfileStatus_t s_profile_status;
 
 static ChassisStatus_t s_status;
 static uint32_t s_last_control_ms = 0U;
-
-/* 最终命令与中间斜坡状态均使用count/s保存。 */
-static int32_t s_left_command_cps = 0;
-static int32_t s_right_command_cps = 0;
-static int32_t s_forward_ramped_cps = 0;
-static int32_t s_turn_ramped_cps = 0;
+static uint16_t s_stopped_stable_ms = 0U;
 
 static int32_t Chassis_DivideRounded(int64_t numerator,
                                      int64_t denominator)
@@ -73,29 +72,19 @@ static int32_t Chassis_ClampCps(int64_t speed_cps)
     return (int32_t)speed_cps;
 }
 
-
-static int32_t Chassis_KeepCommandDirection(
-    int32_t ramped_cps,
-    int32_t command_cps)
+static int32_t Chassis_AbsI32(int32_t value)
 {
-    /*
-     * 当最终命令明确为正/负时，中间目标不得短暂越过零点。
-     * 这可避免转向斜坡快于前进斜坡时，非负巡线命令
-     * 临时产生反向轮速。
-     *
-     * command=0时不强行钳位，允许当前速度按减速斜坡回零。
-     */
-    if ((command_cps > 0) && (ramped_cps < 0))
+    if (value >= 0)
     {
-        return 0;
+        return value;
     }
 
-    if ((command_cps < 0) && (ramped_cps > 0))
+    if (value == INT32_MIN)
     {
-        return 0;
+        return INT32_MAX;
     }
 
-    return ramped_cps;
+    return -value;
 }
 
 static int32_t Chassis_AddSaturated(int32_t total, int16_t delta)
@@ -113,21 +102,6 @@ static int32_t Chassis_AddSaturated(int32_t total, int16_t delta)
     }
 
     return (int32_t)result;
-}
-
-static int32_t Chassis_AbsI32(int32_t value)
-{
-    if (value >= 0)
-    {
-        return value;
-    }
-
-    if (value == INT32_MIN)
-    {
-        return INT32_MAX;
-    }
-
-    return -value;
 }
 
 static int32_t Chassis_AbsDelta(int16_t delta)
@@ -188,207 +162,170 @@ int32_t Chassis_CpsToMmps(int32_t speed_cps)
         1000LL);
 }
 
-static int32_t Chassis_ApproachRate(
-    int32_t current,
-    int32_t target,
-    int32_t rate_cps_per_s,
-    uint16_t dt_ms)
+static ChassisMotionMode_t Chassis_MapProfileMode(
+    ChassisSpeedProfileMode_t mode)
 {
-    int64_t scaled_step;
-    int32_t maximum_step;
-    int32_t difference;
-
-    if (rate_cps_per_s <= 0)
+    switch (mode)
     {
-        return target;
+        case CHASSIS_SPEED_PROFILE_MODE_DRIVE:
+            return CHASSIS_MOTION_MODE_DRIVE;
+        case CHASSIS_SPEED_PROFILE_MODE_SOFT_STOP:
+            return CHASSIS_MOTION_MODE_SOFT_STOP;
+        case CHASSIS_SPEED_PROFILE_MODE_FAST_STOP:
+            return CHASSIS_MOTION_MODE_FAST_STOP;
+        case CHASSIS_SPEED_PROFILE_MODE_REVERSAL_STOP:
+            return CHASSIS_MOTION_MODE_REVERSAL_STOP;
+        case CHASSIS_SPEED_PROFILE_MODE_IDLE:
+        default:
+            return CHASSIS_MOTION_MODE_IDLE;
     }
-
-    /* 向上取整，避免5 ms周期下因整数截断停滞。 */
-    scaled_step =
-        (int64_t)rate_cps_per_s * (int64_t)dt_ms;
-
-    maximum_step =
-        (int32_t)((scaled_step + 999LL) / 1000LL);
-
-    if (maximum_step < 1)
-    {
-        maximum_step = 1;
-    }
-
-    difference = target - current;
-
-    if (difference > maximum_step)
-    {
-        return current + maximum_step;
-    }
-
-    if (difference < -maximum_step)
-    {
-        return current - maximum_step;
-    }
-
-    return target;
 }
 
-static int32_t Chassis_SelectForwardRateCps(
-    int32_t current_cps,
-    int32_t target_cps)
+static void Chassis_ResetSpeedProfile(void)
 {
-    bool same_direction;
-    bool increasing_magnitude;
+    ChassisSpeedProfile_Reset(&s_speed_profile);
+    memset(&s_profile_status, 0, sizeof(s_profile_status));
 
-    if ((current_cps == 0) && (target_cps != 0))
-    {
-        return Chassis_MmpsToCps(
-            CHASSIS_RAMP_FORWARD_ACCEL_MM_S2);
-    }
-
-    if (target_cps == 0)
-    {
-        return Chassis_MmpsToCps(
-            CHASSIS_RAMP_FORWARD_DECEL_MM_S2);
-    }
-
-    same_direction =
-        ((current_cps >= 0) && (target_cps >= 0)) ||
-        ((current_cps <= 0) && (target_cps <= 0));
-
-    if (!same_direction)
-    {
-        /* 换向先按减速斜率穿过0。 */
-        return Chassis_MmpsToCps(
-            CHASSIS_RAMP_FORWARD_DECEL_MM_S2);
-    }
-
-    increasing_magnitude =
-        Chassis_AbsI32(target_cps) >
-        Chassis_AbsI32(current_cps);
-
-    return Chassis_MmpsToCps(
-        increasing_magnitude
-            ? CHASSIS_RAMP_FORWARD_ACCEL_MM_S2
-            : CHASSIS_RAMP_FORWARD_DECEL_MM_S2);
-}
-
-static void Chassis_ResetSpeedRamp(void)
-{
-    s_left_command_cps = 0;
-    s_right_command_cps = 0;
-    s_forward_ramped_cps = 0;
-    s_turn_ramped_cps = 0;
+    s_stopped_stable_ms = 0U;
+    s_status.speed_ramp_active = false;
+    s_status.motion_stopped = true;
+    s_status.motion_mode = CHASSIS_MOTION_MODE_IDLE;
+    s_status.stopped_stable_ms = 0U;
 
     s_status.left_command_mm_s = 0;
     s_status.right_command_mm_s = 0;
     s_status.left_command_cps = 0;
     s_status.right_command_cps = 0;
-
     s_status.left_target_mm_s = 0;
     s_status.right_target_mm_s = 0;
     s_status.left_target_cps = 0;
     s_status.right_target_cps = 0;
-    s_status.speed_ramp_active = false;
+
+    s_status.forward_command_mm_s = 0;
+    s_status.turn_command_mm_s = 0;
+    s_status.forward_target_mm_s = 0;
+    s_status.turn_target_mm_s = 0;
+    s_status.forward_accel_mm_s2 = 0;
+    s_status.turn_accel_mm_s2 = 0;
+    s_status.stop_reference_mm_s = 0;
+    s_status.stop_accel_mm_s2 = 0;
 }
 
-
-static bool Chassis_UpdateSpeedRamp(uint16_t dt_ms)
+static bool Chassis_UpdateSpeedProfile(uint16_t dt_ms)
 {
-    int32_t command_forward_cps;
-    int32_t command_turn_cps;
-    int32_t forward_rate_cps_per_s;
-    int32_t turn_rate_cps_per_s;
-    int32_t left_ramped_cps;
-    int32_t right_ramped_cps;
+    int32_t left_target_cps;
+    int32_t right_target_cps;
 
-    command_forward_cps =
-        (s_left_command_cps + s_right_command_cps) / 2;
+    if (!ChassisSpeedProfile_Update(&s_speed_profile, dt_ms))
+    {
+        return false;
+    }
 
-    command_turn_cps =
-        (s_left_command_cps - s_right_command_cps) / 2;
+    if (!ChassisSpeedProfile_GetStatus(
+            &s_speed_profile,
+            &s_profile_status))
+    {
+        return false;
+    }
 
-    forward_rate_cps_per_s =
-        Chassis_SelectForwardRateCps(
-            s_forward_ramped_cps,
-            command_forward_cps);
+    left_target_cps = Chassis_ClampCps(
+        Chassis_MmpsToCps(s_profile_status.output_left_mm_s));
 
-    turn_rate_cps_per_s =
-        Chassis_MmpsToCps(
-            CHASSIS_RAMP_TURN_SLEW_MM_S2);
-
-    s_forward_ramped_cps = Chassis_ApproachRate(
-        s_forward_ramped_cps,
-        command_forward_cps,
-        forward_rate_cps_per_s,
-        dt_ms);
-
-    s_turn_ramped_cps = Chassis_ApproachRate(
-        s_turn_ramped_cps,
-        command_turn_cps,
-        turn_rate_cps_per_s,
-        dt_ms);
-
-    left_ramped_cps = Chassis_ClampCps(
-        (int64_t)s_forward_ramped_cps +
-        (int64_t)s_turn_ramped_cps);
-
-    right_ramped_cps = Chassis_ClampCps(
-        (int64_t)s_forward_ramped_cps -
-        (int64_t)s_turn_ramped_cps);
-
-    left_ramped_cps = Chassis_KeepCommandDirection(
-        left_ramped_cps,
-        s_left_command_cps);
-
-    right_ramped_cps = Chassis_KeepCommandDirection(
-        right_ramped_cps,
-        s_right_command_cps);
-
-    /*
-     * 两轮限幅后重新同步内部前进/转向状态，
-     * 防止内部状态长期超出可实现范围。
-     */
-    s_forward_ramped_cps =
-        (left_ramped_cps + right_ramped_cps) / 2;
-
-    s_turn_ramped_cps =
-        (left_ramped_cps - right_ramped_cps) / 2;
-
-    s_status.left_target_cps = left_ramped_cps;
-    s_status.right_target_cps = right_ramped_cps;
-    s_status.left_target_mm_s =
-        Chassis_CpsToMmps(left_ramped_cps);
-    s_status.right_target_mm_s =
-        Chassis_CpsToMmps(right_ramped_cps);
-
-    s_status.speed_ramp_active =
-        (left_ramped_cps != s_left_command_cps) ||
-        (right_ramped_cps != s_right_command_cps);
+    right_target_cps = Chassis_ClampCps(
+        Chassis_MmpsToCps(s_profile_status.output_right_mm_s));
 
     if (!WheelSpeedControl_SetTargetCps(
             &s_left_controller,
-            left_ramped_cps))
+            left_target_cps))
     {
         return false;
     }
 
     if (!WheelSpeedControl_SetTargetCps(
             &s_right_controller,
-            right_ramped_cps))
+            right_target_cps))
     {
         return false;
     }
 
+    s_status.left_target_mm_s =
+        s_profile_status.output_left_mm_s;
+    s_status.right_target_mm_s =
+        s_profile_status.output_right_mm_s;
+    s_status.left_target_cps = left_target_cps;
+    s_status.right_target_cps = right_target_cps;
+
+    s_status.forward_target_mm_s =
+        s_profile_status.forward_speed_mm_s;
+    s_status.turn_target_mm_s =
+        s_profile_status.turn_speed_mm_s;
+    s_status.forward_accel_mm_s2 =
+        s_profile_status.forward_accel_mm_s2;
+    s_status.turn_accel_mm_s2 =
+        s_profile_status.turn_accel_mm_s2;
+    s_status.stop_reference_mm_s =
+        s_profile_status.stop_reference_mm_s;
+    s_status.stop_accel_mm_s2 =
+        s_profile_status.stop_accel_mm_s2;
+
+    s_status.speed_ramp_active = s_profile_status.active;
+    s_status.motion_mode =
+        Chassis_MapProfileMode(s_profile_status.mode);
+
     return true;
+}
+
+static void Chassis_UpdateStoppedState(uint16_t dt_ms)
+{
+    bool measured_slow;
+    bool profile_zero;
+    uint32_t next_hold;
+
+    measured_slow =
+        (Chassis_AbsI32(s_status.left_measured_mm_s) <=
+         CHASSIS_STOP_MEASURED_THRESHOLD_MM_S) &&
+        (Chassis_AbsI32(s_status.right_measured_mm_s) <=
+         CHASSIS_STOP_MEASURED_THRESHOLD_MM_S);
+
+    profile_zero =
+        s_profile_status.stopped &&
+        (s_status.left_target_cps == 0) &&
+        (s_status.right_target_cps == 0);
+
+    if (profile_zero && measured_slow)
+    {
+        next_hold = (uint32_t)s_stopped_stable_ms +
+                    (uint32_t)dt_ms;
+
+        if (next_hold > (uint32_t)CHASSIS_STOP_STABLE_HOLD_MS)
+        {
+            next_hold = CHASSIS_STOP_STABLE_HOLD_MS;
+        }
+
+        s_stopped_stable_ms = (uint16_t)next_hold;
+    }
+    else
+    {
+        s_stopped_stable_ms = 0U;
+    }
+
+    s_status.stopped_stable_ms = s_stopped_stable_ms;
+    s_status.motion_stopped =
+        s_stopped_stable_ms >= CHASSIS_STOP_STABLE_HOLD_MS;
 }
 
 bool Chassis_Init(void)
 {
     WheelSpeedConfig_t left_config;
     WheelSpeedConfig_t right_config;
+    ChassisSpeedProfileConfig_t profile_config;
 
     s_initialized = false;
     s_enabled = false;
+    s_emergency_latched = false;
     memset(&s_status, 0, sizeof(s_status));
-    Chassis_ResetSpeedRamp();
+    memset(&s_speed_profile, 0, sizeof(s_speed_profile));
+    memset(&s_profile_status, 0, sizeof(s_profile_status));
 
     if (!BSP_Motor_Init())
     {
@@ -446,9 +383,45 @@ bool Chassis_Init(void)
         return false;
     }
 
+    profile_config.max_wheel_speed_mm_s =
+        CHASSIS_MAX_WHEEL_SPEED_MM_S;
+    profile_config.forward_accel_mm_s2 =
+        CHASSIS_PROFILE_FORWARD_ACCEL_MM_S2;
+    profile_config.forward_decel_mm_s2 =
+        CHASSIS_PROFILE_FORWARD_DECEL_MM_S2;
+    profile_config.forward_accel_jerk_mm_s3 =
+        CHASSIS_PROFILE_FORWARD_ACCEL_JERK_MM_S3;
+    profile_config.forward_decel_jerk_mm_s3 =
+        CHASSIS_PROFILE_FORWARD_DECEL_JERK_MM_S3;
+    profile_config.turn_accel_mm_s2 =
+        CHASSIS_PROFILE_TURN_ACCEL_MM_S2;
+    profile_config.turn_jerk_mm_s3 =
+        CHASSIS_PROFILE_TURN_JERK_MM_S3;
+    profile_config.soft_stop_decel_mm_s2 =
+        CHASSIS_PROFILE_SOFT_STOP_DECEL_MM_S2;
+    profile_config.soft_stop_jerk_mm_s3 =
+        CHASSIS_PROFILE_SOFT_STOP_JERK_MM_S3;
+    profile_config.fast_stop_decel_mm_s2 =
+        CHASSIS_PROFILE_FAST_STOP_DECEL_MM_S2;
+    profile_config.fast_stop_jerk_mm_s3 =
+        CHASSIS_PROFILE_FAST_STOP_JERK_MM_S3;
+    profile_config.speed_snap_mm_s =
+        CHASSIS_PROFILE_SPEED_SNAP_MM_S;
+    profile_config.accel_snap_mm_s2 =
+        CHASSIS_PROFILE_ACCEL_SNAP_MM_S2;
+
+    if (!ChassisSpeedProfile_Init(
+            &s_speed_profile,
+            &profile_config))
+    {
+        return false;
+    }
+
+    Chassis_ResetSpeedProfile();
     s_last_control_ms = HAL_GetTick();
     s_initialized = true;
     s_status.initialized = true;
+    s_status.motion_stopped = true;
 
     return true;
 }
@@ -467,8 +440,9 @@ bool Chassis_Enable(bool enable)
         memset(&s_status, 0, sizeof(s_status));
         s_status.initialized = true;
         s_status.encoder_sample_valid = true;
+        s_status.motion_stopped = true;
 
-        Chassis_ResetSpeedRamp();
+        Chassis_ResetSpeedProfile();
         WheelSpeedControl_Reset(&s_left_controller);
         WheelSpeedControl_Reset(&s_right_controller);
 
@@ -477,6 +451,8 @@ bool Chassis_Enable(bool enable)
             return false;
         }
 
+        s_emergency_latched = false;
+        s_status.emergency_latched = false;
         s_last_control_ms = HAL_GetTick();
         s_enabled = true;
         s_status.enabled = true;
@@ -501,6 +477,51 @@ bool Chassis_IsEnabled(void)
     return s_initialized && s_enabled;
 }
 
+bool Chassis_SetWheelSpeedMmps(int32_t left_mm_s,
+                               int32_t right_mm_s)
+{
+    int32_t clamped_left_mm_s;
+    int32_t clamped_right_mm_s;
+
+    if ((!s_initialized) || s_emergency_latched)
+    {
+        return false;
+    }
+
+    clamped_left_mm_s =
+        Chassis_ClampMmps((int64_t)left_mm_s);
+    clamped_right_mm_s =
+        Chassis_ClampMmps((int64_t)right_mm_s);
+
+    if (!ChassisSpeedProfile_SetCommandMmps(
+            &s_speed_profile,
+            clamped_left_mm_s,
+            clamped_right_mm_s))
+    {
+        return false;
+    }
+
+    s_status.left_command_mm_s = clamped_left_mm_s;
+    s_status.right_command_mm_s = clamped_right_mm_s;
+    s_status.left_command_cps =
+        Chassis_MmpsToCps(clamped_left_mm_s);
+    s_status.right_command_cps =
+        Chassis_MmpsToCps(clamped_right_mm_s);
+    s_status.forward_command_mm_s =
+        (clamped_left_mm_s + clamped_right_mm_s) / 2;
+    s_status.turn_command_mm_s =
+        (clamped_left_mm_s - clamped_right_mm_s) / 2;
+
+    if ((clamped_left_mm_s != 0) ||
+        (clamped_right_mm_s != 0))
+    {
+        s_status.motion_stopped = false;
+        s_stopped_stable_ms = 0U;
+    }
+
+    return true;
+}
+
 bool Chassis_SetWheelSpeedCps(int32_t left_cps,
                               int32_t right_cps)
 {
@@ -509,46 +530,12 @@ bool Chassis_SetWheelSpeedCps(int32_t left_cps,
         return false;
     }
 
-    s_left_command_cps =
-        Chassis_ClampCps((int64_t)left_cps);
+    left_cps = Chassis_ClampCps((int64_t)left_cps);
+    right_cps = Chassis_ClampCps((int64_t)right_cps);
 
-    s_right_command_cps =
-        Chassis_ClampCps((int64_t)right_cps);
-
-    s_status.left_command_cps = s_left_command_cps;
-    s_status.right_command_cps = s_right_command_cps;
-    s_status.left_command_mm_s =
-        Chassis_CpsToMmps(s_left_command_cps);
-    s_status.right_command_mm_s =
-        Chassis_CpsToMmps(s_right_command_cps);
-
-    s_status.speed_ramp_active =
-        (s_status.left_target_cps != s_left_command_cps) ||
-        (s_status.right_target_cps != s_right_command_cps);
-
-    return true;
-}
-
-bool Chassis_SetWheelSpeedMmps(int32_t left_mm_s,
-                               int32_t right_mm_s)
-{
-    int32_t clamped_left_mm_s;
-    int32_t clamped_right_mm_s;
-
-    if (!s_initialized)
-    {
-        return false;
-    }
-
-    clamped_left_mm_s =
-        Chassis_ClampMmps((int64_t)left_mm_s);
-
-    clamped_right_mm_s =
-        Chassis_ClampMmps((int64_t)right_mm_s);
-
-    return Chassis_SetWheelSpeedCps(
-        Chassis_MmpsToCps(clamped_left_mm_s),
-        Chassis_MmpsToCps(clamped_right_mm_s));
+    return Chassis_SetWheelSpeedMmps(
+        Chassis_CpsToMmps(left_cps),
+        Chassis_CpsToMmps(right_cps));
 }
 
 bool Chassis_SetVelocity(int32_t linear_mm_s,
@@ -568,15 +555,65 @@ bool Chassis_SetVelocity(int32_t linear_mm_s,
          (int64_t)CHASSIS_TRACK_WIDTH_MM) /
         2000LL;
 
-    left_mm_s =
-        (int64_t)linear_mm_s - turning_mm_s;
-
-    right_mm_s =
-        (int64_t)linear_mm_s + turning_mm_s;
+    left_mm_s = (int64_t)linear_mm_s - turning_mm_s;
+    right_mm_s = (int64_t)linear_mm_s + turning_mm_s;
 
     return Chassis_SetWheelSpeedMmps(
         Chassis_ClampMmps(left_mm_s),
         Chassis_ClampMmps(right_mm_s));
+}
+
+bool Chassis_RequestStop(ChassisStopMode_t mode)
+{
+    ChassisSpeedProfileMode_t profile_mode;
+
+    if (!s_initialized)
+    {
+        return false;
+    }
+
+    if (mode == CHASSIS_STOP_MODE_EMERGENCY)
+    {
+        Chassis_Stop();
+        return true;
+    }
+
+    if (s_emergency_latched)
+    {
+        return false;
+    }
+
+    profile_mode =
+        (mode == CHASSIS_STOP_MODE_FAST) ?
+        CHASSIS_SPEED_PROFILE_MODE_FAST_STOP :
+        CHASSIS_SPEED_PROFILE_MODE_SOFT_STOP;
+
+    if (!ChassisSpeedProfile_RequestStop(
+            &s_speed_profile,
+            profile_mode))
+    {
+        return false;
+    }
+
+    s_status.left_command_mm_s = 0;
+    s_status.right_command_mm_s = 0;
+    s_status.left_command_cps = 0;
+    s_status.right_command_cps = 0;
+    s_status.forward_command_mm_s = 0;
+    s_status.turn_command_mm_s = 0;
+    s_status.motion_stopped = false;
+    s_stopped_stable_ms = 0U;
+    return true;
+}
+
+bool Chassis_IsMotionStopped(void)
+{
+    if (!s_initialized)
+    {
+        return true;
+    }
+
+    return s_status.motion_stopped || s_emergency_latched;
 }
 
 bool Chassis_SetWheelPiGainsQ10(int32_t left_kp_q10,
@@ -645,11 +682,16 @@ void Chassis_Stop(void)
         return;
     }
 
-    Chassis_ResetSpeedRamp();
+    Chassis_ResetSpeedProfile();
     Chassis_ClearControlStatus();
 
     WheelSpeedControl_Reset(&s_left_controller);
     WheelSpeedControl_Reset(&s_right_controller);
+
+    s_emergency_latched = true;
+    s_status.emergency_latched = true;
+    s_status.motion_mode = CHASSIS_MOTION_MODE_EMERGENCY;
+    s_status.motion_stopped = true;
 
     BSP_Motor_BrakeAll();
 }
@@ -665,7 +707,7 @@ bool Chassis_Update(void)
     int16_t left_pwm;
     int16_t right_pwm;
 
-    if (!Chassis_IsEnabled())
+    if ((!Chassis_IsEnabled()) || s_emergency_latched)
     {
         return false;
     }
@@ -688,7 +730,6 @@ bool Chassis_Update(void)
         s_status.timestamp_ms = now_ms;
         s_status.timing_overrun_count++;
         s_status.control_sequence++;
-
         s_last_control_ms = now_ms;
         return false;
     }
@@ -729,14 +770,13 @@ bool Chassis_Update(void)
         s_status.encoder_sample_valid = false;
 
         Chassis_Stop();
-
         s_status.dt_ms = (uint16_t)elapsed_ms;
         s_status.timestamp_ms = now_ms;
         s_status.control_sequence++;
         return false;
     }
 
-    if (!Chassis_UpdateSpeedRamp((uint16_t)elapsed_ms))
+    if (!Chassis_UpdateSpeedProfile((uint16_t)elapsed_ms))
     {
         Chassis_Stop();
         return false;
@@ -760,61 +800,43 @@ bool Chassis_Update(void)
 
     s_status.left_target_cps =
         WheelSpeedControl_GetTargetCps(&s_left_controller);
-
     s_status.right_target_cps =
         WheelSpeedControl_GetTargetCps(&s_right_controller);
 
-    s_status.left_target_mm_s =
-        Chassis_CpsToMmps(s_status.left_target_cps);
-
-    s_status.right_target_mm_s =
-        Chassis_CpsToMmps(s_status.right_target_cps);
-
     s_status.left_raw_measured_cps =
         WheelSpeedControl_GetRawMeasuredCps(&s_left_controller);
-
     s_status.right_raw_measured_cps =
         WheelSpeedControl_GetRawMeasuredCps(&s_right_controller);
-
     s_status.left_measured_cps =
         WheelSpeedControl_GetMeasuredCps(&s_left_controller);
-
     s_status.right_measured_cps =
         WheelSpeedControl_GetMeasuredCps(&s_right_controller);
 
     s_status.left_measured_mm_s =
         Chassis_CpsToMmps(s_status.left_measured_cps);
-
     s_status.right_measured_mm_s =
         Chassis_CpsToMmps(s_status.right_measured_cps);
 
     s_status.left_error_cps =
         WheelSpeedControl_GetErrorCps(&s_left_controller);
-
     s_status.right_error_cps =
         WheelSpeedControl_GetErrorCps(&s_right_controller);
 
     s_status.left_feedforward_pwm =
         WheelSpeedControl_GetFeedforwardPwm(&s_left_controller);
-
     s_status.right_feedforward_pwm =
         WheelSpeedControl_GetFeedforwardPwm(&s_right_controller);
-
     s_status.left_proportional_pwm =
         WheelSpeedControl_GetProportionalPwm(&s_left_controller);
-
     s_status.right_proportional_pwm =
         WheelSpeedControl_GetProportionalPwm(&s_right_controller);
-
     s_status.left_integral_pwm =
         WheelSpeedControl_GetIntegralPwm(&s_left_controller);
-
     s_status.right_integral_pwm =
         WheelSpeedControl_GetIntegralPwm(&s_right_controller);
 
     s_status.left_output_saturated =
         WheelSpeedControl_IsOutputSaturated(&s_left_controller);
-
     s_status.right_output_saturated =
         WheelSpeedControl_IsOutputSaturated(&s_right_controller);
 
@@ -826,15 +848,17 @@ bool Chassis_Update(void)
     s_status.left_total = Chassis_AddSaturated(
         s_status.left_total,
         encoder_sample.left_delta);
-
     s_status.right_total = Chassis_AddSaturated(
         s_status.right_total,
         encoder_sample.right_delta);
+
+    Chassis_UpdateStoppedState((uint16_t)elapsed_ms);
 
     s_status.encoder_sample_valid = true;
     s_status.dt_ms = (uint16_t)elapsed_ms;
     s_status.timestamp_ms = now_ms;
     s_status.control_sequence++;
+    s_status.emergency_latched = s_emergency_latched;
 
     return true;
 }
@@ -848,4 +872,25 @@ bool Chassis_GetStatus(ChassisStatus_t *status)
 
     *status = s_status;
     return true;
+}
+
+const char *Chassis_MotionModeName(ChassisMotionMode_t mode)
+{
+    switch (mode)
+    {
+        case CHASSIS_MOTION_MODE_IDLE:
+            return "IDLE";
+        case CHASSIS_MOTION_MODE_DRIVE:
+            return "DRIVE";
+        case CHASSIS_MOTION_MODE_SOFT_STOP:
+            return "SOFT";
+        case CHASSIS_MOTION_MODE_FAST_STOP:
+            return "FAST";
+        case CHASSIS_MOTION_MODE_REVERSAL_STOP:
+            return "REV";
+        case CHASSIS_MOTION_MODE_EMERGENCY:
+            return "EMG";
+        default:
+            return "UNKNOWN";
+    }
 }

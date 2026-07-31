@@ -8,6 +8,23 @@ extern "C" {
 #include <stdbool.h>
 #include <stdint.h>
 
+typedef enum
+{
+    CHASSIS_STOP_MODE_SOFT = 0,
+    CHASSIS_STOP_MODE_FAST,
+    CHASSIS_STOP_MODE_EMERGENCY
+} ChassisStopMode_t;
+
+typedef enum
+{
+    CHASSIS_MOTION_MODE_IDLE = 0,
+    CHASSIS_MOTION_MODE_DRIVE,
+    CHASSIS_MOTION_MODE_SOFT_STOP,
+    CHASSIS_MOTION_MODE_FAST_STOP,
+    CHASSIS_MOTION_MODE_REVERSAL_STOP,
+    CHASSIS_MOTION_MODE_EMERGENCY
+} ChassisMotionMode_t;
+
 typedef struct
 {
     bool initialized;
@@ -16,18 +33,32 @@ typedef struct
     bool left_output_saturated;
     bool right_output_saturated;
     bool speed_ramp_active;
+    bool motion_stopped;
+    bool emergency_latched;
 
-    /* 上层给出的最终目标。 */
+    ChassisMotionMode_t motion_mode;
+
+    /* 上层最终左右轮命令。 */
     int32_t left_command_mm_s;
     int32_t right_command_mm_s;
     int32_t left_command_cps;
     int32_t right_command_cps;
 
-    /* 编码器前馈+PI当前跟踪的中间目标。 */
+    /* 前馈+PI跟踪的规划中间目标。 */
     int32_t left_target_mm_s;
     int32_t right_target_mm_s;
     int32_t left_target_cps;
     int32_t right_target_cps;
+
+    /* 规划器诊断。 */
+    int32_t forward_command_mm_s;
+    int32_t turn_command_mm_s;
+    int32_t forward_target_mm_s;
+    int32_t turn_target_mm_s;
+    int32_t forward_accel_mm_s2;
+    int32_t turn_accel_mm_s2;
+    int32_t stop_reference_mm_s;
+    int32_t stop_accel_mm_s2;
 
     int32_t left_measured_mm_s;
     int32_t right_measured_mm_s;
@@ -53,6 +84,7 @@ typedef struct
     int32_t right_total;
 
     uint16_t dt_ms;
+    uint16_t stopped_stable_ms;
     uint32_t control_sequence;
     uint32_t timestamp_ms;
     uint32_t timing_overrun_count;
@@ -60,89 +92,45 @@ typedef struct
     uint32_t right_encoder_reject_count;
 } ChassisStatus_t;
 
-/**
- * @brief 初始化电机、编码器和左右轮“前馈+PI”控制器。
- *
- * 初始化后TB6612保持待机，不会驱动电机。
- */
 bool Chassis_Init(void);
-
-/**
- * @brief 使能或关闭底盘。
- *
- * 使能时重置编码器基准、速度斜坡和控制器状态；
- * 关闭时立即短路刹车并拉低TB6612 STBY。
- */
 bool Chassis_Enable(bool enable);
-
 bool Chassis_IsInitialized(void);
 bool Chassis_IsEnabled(void);
 
-/** 将mm/s转换为编码器count/s，不使用浮点数。 */
 int32_t Chassis_MmpsToCps(int32_t speed_mm_s);
-
-/** 将编码器count/s转换为mm/s，不使用浮点数。 */
 int32_t Chassis_CpsToMmps(int32_t speed_cps);
 
-/**
- * @brief 设置左右轮最终目标速度，单位mm/s。
- *
- * 目标不会直接送入PI；Chassis_Update()会按配置斜率生成
- * 中间目标，再由编码器前馈+PI跟踪。
- */
+/* 普通非零命令走限跃度S曲线；0/0自动请求柔和停车。 */
 bool Chassis_SetWheelSpeedMmps(int32_t left_mm_s,
                                int32_t right_mm_s);
-
-/**
- * @brief 设置左右轮最终目标速度，单位count/s。
- *
- * 该接口同样经过速度斜坡。
- */
 bool Chassis_SetWheelSpeedCps(int32_t left_cps,
                               int32_t right_cps);
 
-/**
- * @brief 设置底盘线速度和角速度。
- *
- * @param linear_mm_s 车体中心线速度，正值前进。
- * @param angular_mrad_s 角速度，正值左转（逆时针）。
- */
 bool Chassis_SetVelocity(int32_t linear_mm_s,
                          int32_t angular_mrad_s);
 
-/** 运行时更新左右轮Q10 PI参数。 */
+/* 柔和停车、快速停车或立即锁存急停。 */
+bool Chassis_RequestStop(ChassisStopMode_t mode);
+bool Chassis_IsMotionStopped(void);
+
 bool Chassis_SetWheelPiGainsQ10(int32_t left_kp_q10,
                                 int32_t left_ki_q10,
                                 int32_t right_kp_q10,
                                 int32_t right_ki_q10);
 
-/** 运行时更新左右轮前馈参数。 */
 bool Chassis_SetWheelFeedforwardQ10(
     int32_t left_gain_q10,
     int16_t left_static_pwm,
     int32_t right_gain_q10,
     int16_t right_static_pwm);
 
-/**
- * @brief 安全急停。
- *
- * 最终目标、中间目标、PI和PWM立即清零并短路刹车，
- * 不经过正常减速斜坡。
- */
+/* 兼容旧接口：立即锁存急停并短路刹车。 */
 void Chassis_Stop(void);
 
-/**
- * @brief 非阻塞更新底盘闭环。
- *
- * 主循环中持续调用，标称每5 ms执行一次控制。
- *
- * @return true 本次执行了一个有效控制周期。
- * @return false 尚未到周期、未使能、严重超时或样本被拒绝。
- */
 bool Chassis_Update(void);
-
-/** 获取最近一次底盘状态快照。 */
 bool Chassis_GetStatus(ChassisStatus_t *status);
+
+const char *Chassis_MotionModeName(ChassisMotionMode_t mode);
 
 #ifdef __cplusplus
 }
