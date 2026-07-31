@@ -73,6 +73,9 @@ void TaskMenuUi_SetDistanceMm(uint32_t distance_mm);
 void TaskMenuUi_SetWarningMask(uint32_t warning_mask);
 void TaskMenuUi_SetStatusText(const char *text);
 
+/* Use the 128x64 XX.X timer page for active and finished tasks. */
+void TaskMenuUi_SetFullscreenTimerEnabled(bool enabled);
+
 void TaskMenuUi_SetFault(
     uint32_t fault_code,
     uint32_t fault_detail,

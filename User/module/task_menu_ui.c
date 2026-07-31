@@ -3,6 +3,7 @@
 #include "app_config.h"
 #include "bsp_key.h"
 #include "bsp_oled.h"
+#include "oled_fullscreen_timer.h"
 #include "stm32f4xx_hal.h"
 
 #include <stddef.h>
@@ -12,6 +13,7 @@
 
 static bool s_initialized = false;
 static bool s_display_dirty = false;
+static bool s_fullscreen_timer_enabled = false;
 
 static TaskMenuTask_t s_selected_task =
     TASK_MENU_TASK_2_LAP_STOP;
@@ -332,6 +334,21 @@ static void TaskMenu_RenderFault(void)
 
 static void TaskMenu_RenderCurrent(void)
 {
+    if (s_fullscreen_timer_enabled &&
+        ((s_state == TASK_MENU_STATE_STARTING) ||
+         (s_state == TASK_MENU_STATE_RUNNING) ||
+         (s_state == TASK_MENU_STATE_STOPPING) ||
+         (s_state == TASK_MENU_STATE_FINISHED)))
+    {
+        OledFullscreenTimer_ShowElapsedMs(
+            s_elapsed_ms);
+        s_display_dirty = false;
+        s_last_render_ms = HAL_GetTick();
+        s_last_render_decisecond =
+            s_elapsed_ms / 100U;
+        return;
+    }
+
     switch (s_state)
     {
         case TASK_MENU_STATE_BOOT:
@@ -383,6 +400,7 @@ bool TaskMenuUi_Init(void)
     s_selected_task =
         TASK_MENU_TASK_2_LAP_STOP;
     s_state = TASK_MENU_STATE_BOOT;
+    s_fullscreen_timer_enabled = false;
 
     TaskMenu_ClearRequests();
 
@@ -600,6 +618,19 @@ void TaskMenuUi_SetStatusText(
     {
         s_display_dirty = true;
     }
+}
+
+void TaskMenuUi_SetFullscreenTimerEnabled(bool enabled)
+{
+    if ((!s_initialized) ||
+        (s_fullscreen_timer_enabled == enabled))
+    {
+        return;
+    }
+
+    s_fullscreen_timer_enabled = enabled;
+    OledFullscreenTimer_Reset();
+    s_display_dirty = true;
 }
 
 void TaskMenuUi_SetFault(

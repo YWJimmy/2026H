@@ -99,6 +99,12 @@ static void MainApp_SetState(
         return;
     }
 
+    TaskMenuUi_SetFullscreenTimerEnabled(
+        (state == APP_STATE_STARTING) ||
+        (state == APP_STATE_RUNNING) ||
+        (state == APP_STATE_STOPPING) ||
+        (state == APP_STATE_FINISHED));
+
     switch (state)
     {
         case APP_STATE_BOOT:
