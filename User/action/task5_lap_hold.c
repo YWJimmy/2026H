@@ -170,11 +170,19 @@ static void Task5_Report(uint32_t now_ms)
         (long)s_line_control.left_target_mm_s,
         (long)s_line_control.right_target_mm_s);
     (void)BSP_Debug_Printf(
-        "T5BALL,CX=%ld,TARGET=%ld,ERR=%ld,SPD=%ld,MODE=%s,PULSE=%u,V=%u\r\n",
+        "T5BALL,CX=%ld,XMM=%ld,TMM=%ld,ERRMM=%ld,VMM=%ld,A=%ld,DES=%ld,FF=%ld,ANG=%ld,SCORE=%u,OK=%lu,REJ=%lu,MODE=%s,PULSE=%u,V=%u\r\n",
         (long)s_ball.center_x,
-        (long)s_ball.target_x,
-        (long)s_ball.error_px,
-        (long)s_ball.filtered_speed_px,
+        (long)s_ball.position_mm,
+        (long)s_ball.target_mm,
+        (long)s_ball.error_mm,
+        (long)s_ball.velocity_mm_s,
+        (long)s_ball.estimated_accel_mm_s2,
+        (long)s_ball.desired_ball_accel_mm_s2,
+        (long)s_ball.chassis_ff_accel_mm_s2,
+        (long)s_ball.platform_angle_mrad,
+        (unsigned int)s_ball.confidence_milli,
+        (unsigned long)s_ball.accepted_frames,
+        (unsigned long)s_ball.rejected_frames,
         BallPositionAction_StateName(s_ball.state),
         (unsigned int)s_ball.servo_pulse_us,
         s_ball.vision_data_valid ? 1U : 0U);
@@ -298,11 +306,6 @@ Task5LapHoldResult_t Task5LapHold_Update(uint32_t now_ms)
         return Task5_Fault(9U);
     }
 
-    if ((s_state != TASK5_STATE_USER_STOPPING) &&
-        !Task5_UpdateBall(now_ms))
-    {
-        return Task5_Fault(10U);
-    }
     if ((s_state != TASK5_STATE_STOPPING) &&
         (s_state != TASK5_STATE_USER_STOPPING) &&
         !Task5_UpdateLine(&has_new_line_result))
@@ -316,6 +319,11 @@ Task5LapHoldResult_t Task5LapHold_Update(uint32_t now_ms)
         !Chassis_GetStatus(&s_chassis))
     {
         return Task5_Fault(12U);
+    }
+    if ((s_state != TASK5_STATE_USER_STOPPING) &&
+        !Task5_UpdateBall(now_ms))
+    {
+        return Task5_Fault(10U);
     }
     Task5_Report(now_ms);
 

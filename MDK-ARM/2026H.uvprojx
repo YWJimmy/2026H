@@ -790,9 +790,19 @@
               <FilePath>..\User\module\vision.c</FilePath>
             </File>
             <File>
-              <FileName>ball_balance_control.c</FileName>
+              <FileName>ball_motion_estimator.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\User\module\ball_balance_control.c</FilePath>
+              <FilePath>..\User\module\ball_motion_estimator.c</FilePath>
+            </File>
+            <File>
+              <FileName>ball_dynamics_model.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\module\ball_dynamics_model.c</FilePath>
+            </File>
+            <File>
+              <FileName>ball_position_controller.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\module\ball_position_controller.c</FilePath>
             </File>
             <File>
               <FileName>chassis_speed_profile.c</FileName>

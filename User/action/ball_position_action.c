@@ -1,7 +1,8 @@
 #include "ball_position_action.h"
 
+#include "ball_motion_estimator.h"
 #include "ball_position_action_config.h"
-#include "ball_balance_control_config.h"
+#include "ball_dynamics_model.h"
 #include "vision.h"
 
 #include <limits.h>
@@ -12,9 +13,14 @@ static bool s_initialized = false;
 static BallPositionActionCommand_t s_command;
 static BallPositionActionStatus_t s_status;
 static VisionStatus_t s_vision;
-static BallBalanceControlStatus_t s_control;
+static BallMotionState_t s_motion;
+static BallBaseMotion_t s_base_motion;
+static BallPositionControllerStatus_t s_control;
 static uint32_t s_last_vision_sequence = 0U;
-static int32_t s_previous_center_x = 0;
+static int64_t s_capture_sum_um = 0;
+static int32_t s_capture_min_um = 0;
+static int32_t s_capture_max_um = 0;
+static int32_t s_target_position_um = 0;
 
 static int32_t BallPosition_AbsI32(int32_t value)
 {
@@ -22,20 +28,15 @@ static int32_t BallPosition_AbsI32(int32_t value)
     {
         return value;
     }
-    if (value == INT32_MIN)
-    {
-        return INT32_MAX;
-    }
-    return -value;
+    return (value == INT32_MIN) ? INT32_MAX : -value;
 }
 
-static BallPositionActionResult_t BallPosition_Fault(
-    uint32_t detail)
+static BallPositionActionResult_t BallPosition_Fault(uint32_t detail)
 {
     s_status.fault_detail = detail;
     s_status.state = BALL_POSITION_ACTION_STATE_FAULT;
     s_status.active = false;
-    BallBalanceControl_Stop();
+    BallPositionController_Stop();
     Vision_Stop();
     return BALL_POSITION_ACTION_RESULT_FAULT;
 }
@@ -49,23 +50,28 @@ static bool BallPosition_CommandValid(
     }
     if ((!command->capture_current_target) &&
         ((command->target_x < 0) ||
-         (command->target_x > BALL_BALANCE_VISION_X_MAX)))
+         (command->target_x >=
+          (int32_t)VISION_PROTOCOL_FRAME_WIDTH)))
     {
         return false;
     }
-    return (command->tolerance_px >= 0) &&
-           (command->settle_speed_px >= 0) &&
-           (command->stable_frames > 0U);
+    return (command->tolerance_mm >= 0) &&
+           (command->settle_speed_mm_s >= 0) &&
+           (command->stable_frames > 0U) &&
+           (command->capture_frames > 0U) &&
+           (command->capture_min_score_milli <= 1000U) &&
+           (command->capture_max_spread_mm >= 0);
 }
 
 static void BallPosition_ResetTargetState(uint32_t now_ms)
 {
     s_status.target_timestamp_ms = now_ms;
     s_status.stable_frame_count = 0U;
+    s_status.capture_frame_count = 0U;
     s_status.reached = false;
-    s_status.raw_speed_px = 0;
-    s_status.filtered_speed_px = 0;
-    s_previous_center_x = 0;
+    s_capture_sum_um = 0;
+    s_capture_min_um = 0;
+    s_capture_max_um = 0;
 }
 
 bool BallPositionAction_Init(void)
@@ -86,38 +92,53 @@ void BallPositionAction_DefaultCommand(
     {
         return;
     }
-
     command->target_x = target_x;
-    command->tolerance_px =
-        BALL_POSITION_DEFAULT_TOLERANCE_PX;
-    command->settle_speed_px =
-        BALL_POSITION_DEFAULT_SETTLE_SPEED_PX;
-    command->stable_frames =
-        BALL_POSITION_DEFAULT_STABLE_FRAMES;
+    command->tolerance_mm = BALL_POSITION_DEFAULT_TOLERANCE_MM;
+    command->settle_speed_mm_s =
+        BALL_POSITION_DEFAULT_SETTLE_SPEED_MM_S;
+    command->stable_frames = BALL_POSITION_DEFAULT_STABLE_FRAMES;
+    command->capture_frames = BALL_POSITION_CAPTURE_FRAMES;
+    command->capture_min_score_milli =
+        BALL_POSITION_CAPTURE_MIN_SCORE_MILLI;
+    command->capture_max_spread_mm =
+        BALL_POSITION_CAPTURE_MAX_SPREAD_MM;
     command->vision_timeout_ms =
         BALL_POSITION_DEFAULT_VISION_TIMEOUT_MS;
     command->move_timeout_ms = 0U;
     command->capture_current_target = false;
 }
 
+static bool BallPosition_ApplyTarget(int32_t target_um)
+{
+    s_target_position_um = target_um;
+    s_status.target_mm = target_um / 1000;
+    s_status.target_x =
+        BallMotionEstimator_PositionUmToPixel(target_um);
+    return BallPositionController_SetTarget(
+        target_um,
+        s_command.tolerance_mm * 1000,
+        s_command.settle_speed_mm_s * 1000);
+}
+
 bool BallPositionAction_Start(
     const BallPositionActionCommand_t *command,
     uint32_t now_ms)
 {
-    if ((!s_initialized) ||
-        !BallPosition_CommandValid(command) ||
+    int32_t target_um;
+
+    if ((!s_initialized) || !BallPosition_CommandValid(command) ||
         s_status.active)
     {
         s_status.fault_detail = 1U;
         return false;
     }
-
     if (!Vision_Init())
     {
         s_status.fault_detail = 2U;
         return false;
     }
-    if (!BallBalanceControl_Init())
+    if (!BallMotionEstimator_Init(now_ms) ||
+        !BallPositionController_Init(now_ms))
     {
         Vision_Stop();
         s_status.fault_detail = 3U;
@@ -130,44 +151,35 @@ bool BallPositionAction_Start(
         s_command.vision_timeout_ms =
             BALL_POSITION_DEFAULT_VISION_TIMEOUT_MS;
     }
-
     memset(&s_vision, 0, sizeof(s_vision));
+    memset(&s_motion, 0, sizeof(s_motion));
+    memset(&s_base_motion, 0, sizeof(s_base_motion));
     memset(&s_control, 0, sizeof(s_control));
     s_last_vision_sequence = 0U;
-    s_previous_center_x = 0;
+    BallDynamicsModel_ResetBaseMotion(now_ms);
 
+    memset(&s_status, 0, sizeof(s_status));
+    s_status.initialized = true;
     s_status.active = true;
-    s_status.target_locked =
-        !s_command.capture_current_target;
-    s_status.reached = false;
-    s_status.vision_data_valid = false;
-    s_status.vision_found = false;
+    s_status.target_locked = !s_command.capture_current_target;
     s_status.state = s_status.target_locked ?
         BALL_POSITION_ACTION_STATE_MOVING :
         BALL_POSITION_ACTION_STATE_ACQUIRING;
     s_status.start_timestamp_ms = now_ms;
     s_status.target_timestamp_ms = now_ms;
     s_status.last_found_timestamp_ms = now_ms;
-    s_status.vision_sequence = 0U;
-    s_status.stable_frame_count = 0U;
-    s_status.fault_detail = 0U;
-    s_status.center_x = 0;
-    s_status.target_x = s_status.target_locked ?
-        s_command.target_x : 0;
-    s_status.error_px = 0;
-    s_status.raw_speed_px = 0;
-    s_status.filtered_speed_px = 0;
-    s_status.servo_pulse_us =
-        BALL_BALANCE_SERVO_CENTER_US;
-    s_status.control_mode =
-        BALL_BALANCE_MODE_WAITING_VISION;
+    s_status.servo_pulse_us = 1700U;
+    BallPosition_ResetTargetState(now_ms);
 
-    if (s_status.target_locked &&
-        !BallBalanceControl_SetTargetX(
-            s_command.target_x))
+    if (s_status.target_locked)
     {
-        (void)BallPosition_Fault(4U);
-        return false;
+        target_um = BallMotionEstimator_PixelToPositionUm(
+            s_command.target_x);
+        if (!BallPosition_ApplyTarget(target_um))
+        {
+            (void)BallPosition_Fault(4U);
+            return false;
+        }
     }
     return true;
 }
@@ -176,31 +188,26 @@ bool BallPositionAction_Retarget(
     const BallPositionActionCommand_t *command,
     uint32_t now_ms)
 {
-    if ((!s_initialized) ||
-        (!s_status.active) ||
+    if ((!s_initialized) || !s_status.active ||
         !BallPosition_CommandValid(command))
     {
         return false;
     }
-
     s_command = *command;
     if (s_command.vision_timeout_ms == 0U)
     {
         s_command.vision_timeout_ms =
             BALL_POSITION_DEFAULT_VISION_TIMEOUT_MS;
     }
-    s_status.target_locked =
-        !s_command.capture_current_target;
-    s_status.target_x = s_status.target_locked ?
-        s_command.target_x : 0;
+    s_status.target_locked = !s_command.capture_current_target;
     s_status.state = s_status.target_locked ?
         BALL_POSITION_ACTION_STATE_MOVING :
         BALL_POSITION_ACTION_STATE_ACQUIRING;
     BallPosition_ResetTargetState(now_ms);
-
     if (s_status.target_locked &&
-        !BallBalanceControl_SetTargetX(
-            s_command.target_x))
+        !BallPosition_ApplyTarget(
+            BallMotionEstimator_PixelToPositionUm(
+                s_command.target_x)))
     {
         (void)BallPosition_Fault(5U);
         return false;
@@ -208,8 +215,91 @@ bool BallPositionAction_Retarget(
     return true;
 }
 
-BallPositionActionResult_t BallPositionAction_Update(
-    uint32_t now_ms)
+static bool BallPosition_UpdateCapture(void)
+{
+    int32_t spread_um;
+    int32_t target_um;
+
+    if (!s_motion.measurement_accepted ||
+        (s_motion.confidence_milli <
+         s_command.capture_min_score_milli) ||
+        (BallPosition_AbsI32(s_motion.velocity_um_s) >
+         BALL_POSITION_CAPTURE_MAX_SPEED_MM_S * 1000))
+    {
+        s_status.capture_frame_count = 0U;
+        s_capture_sum_um = 0;
+        return true;
+    }
+
+    if (s_status.capture_frame_count == 0U)
+    {
+        s_capture_min_um = s_motion.position_um;
+        s_capture_max_um = s_motion.position_um;
+    }
+    else
+    {
+        if (s_motion.position_um < s_capture_min_um)
+        {
+            s_capture_min_um = s_motion.position_um;
+        }
+        if (s_motion.position_um > s_capture_max_um)
+        {
+            s_capture_max_um = s_motion.position_um;
+        }
+    }
+    spread_um = s_capture_max_um - s_capture_min_um;
+    if (spread_um > s_command.capture_max_spread_mm * 1000)
+    {
+        s_status.capture_frame_count = 1U;
+        s_capture_sum_um = s_motion.position_um;
+        s_capture_min_um = s_motion.position_um;
+        s_capture_max_um = s_motion.position_um;
+        return true;
+    }
+
+    s_capture_sum_um += s_motion.position_um;
+    s_status.capture_frame_count++;
+    if (s_status.capture_frame_count < s_command.capture_frames)
+    {
+        return true;
+    }
+
+    target_um = (int32_t)(s_capture_sum_um /
+        s_status.capture_frame_count);
+    if (!BallPosition_ApplyTarget(target_um))
+    {
+        return false;
+    }
+    s_status.target_locked = true;
+    s_status.state = BALL_POSITION_ACTION_STATE_MOVING;
+    s_status.target_timestamp_ms = s_motion.timestamp_ms;
+    s_command.capture_current_target = false;
+    return true;
+}
+
+static void BallPosition_CopyStatus(void)
+{
+    s_status.estimator_valid = s_motion.valid;
+    s_status.center_x = s_motion.center_x_px;
+    s_status.position_mm = s_motion.position_um / 1000;
+    s_status.error_mm =
+        (s_motion.position_um - s_target_position_um) / 1000;
+    s_status.velocity_mm_s = s_motion.velocity_um_s / 1000;
+    s_status.estimated_accel_mm_s2 = s_motion.model_accel_um_s2 / 1000;
+    s_status.chassis_ff_accel_mm_s2 =
+        s_control.chassis_axis_accel_mm_s2;
+    s_status.platform_angle_mrad =
+        s_control.desired_platform_angle_mrad;
+    s_status.desired_ball_accel_mm_s2 =
+        s_control.desired_ball_accel_mm_s2;
+    s_status.servo_pulse_us = s_control.servo_pulse_us;
+    s_status.control_mode = s_control.mode;
+    s_status.confidence_milli = s_motion.confidence_milli;
+    s_status.accepted_frames = s_motion.accepted_frames;
+    s_status.rejected_frames = s_motion.rejected_frames;
+}
+
+BallPositionActionResult_t BallPositionAction_Update(uint32_t now_ms)
 {
     bool new_frame;
 
@@ -224,123 +314,88 @@ BallPositionActionResult_t BallPositionAction_Update(
     }
 
     Vision_Update();
-    if (!Vision_GetStatus(&s_vision))
+    if (!Vision_GetStatus(&s_vision) ||
+        !BallDynamicsModel_GetBaseMotion(now_ms, &s_base_motion))
     {
         return BallPosition_Fault(7U);
     }
-
-    s_status.vision_data_valid = s_vision.data_valid;
-    s_status.vision_found =
-        s_vision.has_frame && s_vision.frame.found;
-    s_status.vision_sequence = s_vision.sequence;
     new_frame = s_vision.has_frame &&
         (s_vision.sequence != s_last_vision_sequence);
-
-    /* Lock a captured target before the first control calculation. */
-    if (new_frame && s_vision.frame.found &&
-        !s_status.target_locked)
-    {
-        int32_t captured_x =
-            (int32_t)s_vision.frame.center_x;
-
-        s_command.target_x = captured_x;
-        s_command.capture_current_target = false;
-        if (!BallBalanceControl_SetTargetX(captured_x))
-        {
-            return BallPosition_Fault(10U);
-        }
-        s_status.target_x = captured_x;
-        s_status.target_locked = true;
-        s_status.state =
-            BALL_POSITION_ACTION_STATE_MOVING;
-        BallPosition_ResetTargetState(now_ms);
-    }
-
-    if (!BallBalanceControl_Update(&s_vision))
-    {
-        return BallPosition_Fault(8U);
-    }
-    if (!BallBalanceControl_GetStatus(&s_control))
-    {
-        return BallPosition_Fault(9U);
-    }
-
-    s_status.control_mode = s_control.mode;
-    s_status.servo_pulse_us =
-        s_control.servo_pulse_us;
-
     if (new_frame)
     {
         s_last_vision_sequence = s_vision.sequence;
-        if (s_vision.frame.found)
+    }
+    if (!BallMotionEstimator_Update(
+            now_ms,
+            BallPositionController_GetPredictedAccelMmps2(),
+            new_frame,
+            s_vision.sequence,
+            s_vision.timestamp_ms,
+            new_frame ? &s_vision.frame : NULL) ||
+        !BallMotionEstimator_GetState(&s_motion))
+    {
+        return BallPosition_Fault(8U);
+    }
+
+    s_status.vision_data_valid = s_vision.data_valid;
+    s_status.vision_found = s_vision.has_frame &&
+        s_vision.frame.found;
+    s_status.vision_sequence = s_vision.sequence;
+    if (s_motion.measurement_accepted)
+    {
+        s_status.last_found_timestamp_ms = now_ms;
+    }
+
+    if (!s_status.target_locked && new_frame &&
+        !BallPosition_UpdateCapture())
+    {
+        return BallPosition_Fault(9U);
+    }
+    if (!BallPositionController_Update(
+            now_ms,
+            &s_motion,
+            &s_base_motion) ||
+        !BallPositionController_GetStatus(&s_control))
+    {
+        return BallPosition_Fault(10U);
+    }
+    BallPosition_CopyStatus();
+
+    if (new_frame && s_motion.measurement_accepted &&
+        s_status.target_locked)
+    {
+        if ((BallPosition_AbsI32(
+                 s_motion.position_um - s_target_position_um) <=
+             s_command.tolerance_mm * 1000) &&
+            (BallPosition_AbsI32(s_motion.velocity_um_s) <=
+             s_command.settle_speed_mm_s * 1000))
         {
-            int32_t center_x =
-                (int32_t)s_vision.frame.center_x;
-
-            s_status.last_found_timestamp_ms = now_ms;
-            s_status.center_x = center_x;
-            if (s_previous_center_x != 0)
-            {
-                s_status.raw_speed_px =
-                    center_x - s_previous_center_x;
-                s_status.filtered_speed_px =
-                    (s_status.filtered_speed_px +
-                     s_status.raw_speed_px) / 2;
-            }
-            else
-            {
-                s_status.raw_speed_px = 0;
-                s_status.filtered_speed_px = 0;
-            }
-            s_previous_center_x = center_x;
-
-            s_status.error_px =
-                s_status.center_x - s_status.target_x;
-
-            if ((BallPosition_AbsI32(s_status.error_px) <=
-                 s_command.tolerance_px) &&
-                (BallPosition_AbsI32(s_status.raw_speed_px) <=
-                 s_command.settle_speed_px) &&
-                (BallPosition_AbsI32(
-                    s_status.filtered_speed_px) <=
-                 s_command.settle_speed_px))
-            {
-                s_status.stable_frame_count++;
-            }
-            else
-            {
-                s_status.stable_frame_count = 0U;
-                s_status.reached = false;
-                s_status.state =
-                    BALL_POSITION_ACTION_STATE_MOVING;
-            }
-
-            if (s_status.stable_frame_count >=
-                s_command.stable_frames)
-            {
-                s_status.reached = true;
-                s_status.state =
-                    BALL_POSITION_ACTION_STATE_HOLDING;
-            }
+            s_status.stable_frame_count++;
+        }
+        else
+        {
+            s_status.stable_frame_count = 0U;
+            s_status.reached = false;
+            s_status.state = BALL_POSITION_ACTION_STATE_MOVING;
+        }
+        if (s_status.stable_frame_count >= s_command.stable_frames)
+        {
+            s_status.reached = true;
+            s_status.state = BALL_POSITION_ACTION_STATE_HOLDING;
         }
     }
 
-    if ((uint32_t)(now_ms -
-            s_status.last_found_timestamp_ms) >=
+    if ((uint32_t)(now_ms - s_status.last_found_timestamp_ms) >=
         s_command.vision_timeout_ms)
     {
         return BallPosition_Fault(11U);
     }
-
-    if ((!s_status.reached) &&
-        (s_command.move_timeout_ms > 0U) &&
-        ((uint32_t)(now_ms -
-            s_status.target_timestamp_ms) >=
+    if (!s_status.reached && (s_command.move_timeout_ms > 0U) &&
+        ((uint32_t)(now_ms - s_status.target_timestamp_ms) >=
          s_command.move_timeout_ms))
     {
         return BallPosition_Fault(12U);
     }
-
     return s_status.reached ?
         BALL_POSITION_ACTION_RESULT_REACHED :
         BALL_POSITION_ACTION_RESULT_RUNNING;
@@ -348,7 +403,7 @@ BallPositionActionResult_t BallPositionAction_Update(
 
 void BallPositionAction_Stop(void)
 {
-    BallBalanceControl_Stop();
+    BallPositionController_Stop();
     Vision_Stop();
     s_status.active = false;
     s_status.target_locked = false;
@@ -366,8 +421,7 @@ bool BallPositionAction_IsActive(void)
     return s_initialized && s_status.active;
 }
 
-bool BallPositionAction_GetStatus(
-    BallPositionActionStatus_t *status)
+bool BallPositionAction_GetStatus(BallPositionActionStatus_t *status)
 {
     if ((!s_initialized) || (status == NULL))
     {
@@ -382,8 +436,7 @@ uint32_t BallPositionAction_GetFaultDetail(void)
     return s_status.fault_detail;
 }
 
-const char *BallPositionAction_StateName(
-    BallPositionActionState_t state)
+const char *BallPositionAction_StateName(BallPositionActionState_t state)
 {
     switch (state)
     {

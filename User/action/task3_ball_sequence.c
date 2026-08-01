@@ -40,14 +40,14 @@ static Task3BallSequenceResult_t Task3_Fault(
 static void Task3_MakeCommand(
     BallPositionActionCommand_t *command,
     int32_t target_x,
-    int32_t tolerance_px,
-    int32_t settle_speed_px,
+    int32_t tolerance_mm,
+    int32_t settle_speed_mm_s,
     uint8_t stable_frames,
     uint32_t timeout_ms)
 {
     BallPositionAction_DefaultCommand(command, target_x);
-    command->tolerance_px = tolerance_px;
-    command->settle_speed_px = settle_speed_px;
+    command->tolerance_mm = tolerance_mm;
+    command->settle_speed_mm_s = settle_speed_mm_s;
     command->stable_frames = stable_frames;
     command->vision_timeout_ms =
         TASK3_VISION_TIMEOUT_MS;
@@ -56,8 +56,8 @@ static void Task3_MakeCommand(
 
 static bool Task3_Retarget(
     int32_t target_x,
-    int32_t tolerance_px,
-    int32_t settle_speed_px,
+    int32_t tolerance_mm,
+    int32_t settle_speed_mm_s,
     uint8_t stable_frames,
     uint32_t timeout_ms,
     uint32_t now_ms)
@@ -67,8 +67,8 @@ static bool Task3_Retarget(
     Task3_MakeCommand(
         &command,
         target_x,
-        tolerance_px,
-        settle_speed_px,
+        tolerance_mm,
+        settle_speed_mm_s,
         stable_frames,
         timeout_ms);
     return BallPositionAction_Retarget(
@@ -86,17 +86,24 @@ static void Task3_Report(uint32_t now_ms)
     s_last_report_ms = now_ms;
 
     (void)BSP_Debug_Printf(
-        "T3,ST=%u,MS=%lu,MOTION=%lu,CX=%ld,TARGET=%ld,ERR=%ld,RAW=%ld,SPD=%ld,STABLE=%lu,MODE=%s,PULSE=%u\r\n",
+        "T3,ST=%u,MS=%lu,MOTION=%lu,CX=%ld,XMM=%ld,TMM=%ld,ERRMM=%ld,VMM=%ld,A=%ld,DES=%ld,FF=%ld,ANG=%ld,SCORE=%u,OK=%lu,REJ=%lu,STABLE=%lu,MODE=%s,PULSE=%u\r\n",
         (unsigned int)s_state,
         (unsigned long)(now_ms - s_start_ms),
         (unsigned long)(s_motion_started ?
             (s_result_locked ? s_result_elapsed_ms :
              (now_ms - s_motion_start_ms)) : 0U),
         (long)s_ball.center_x,
-        (long)s_ball.target_x,
-        (long)s_ball.error_px,
-        (long)s_ball.raw_speed_px,
-        (long)s_ball.filtered_speed_px,
+        (long)s_ball.position_mm,
+        (long)s_ball.target_mm,
+        (long)s_ball.error_mm,
+        (long)s_ball.velocity_mm_s,
+        (long)s_ball.estimated_accel_mm_s2,
+        (long)s_ball.desired_ball_accel_mm_s2,
+        (long)s_ball.chassis_ff_accel_mm_s2,
+        (long)s_ball.platform_angle_mrad,
+        (unsigned int)s_ball.confidence_milli,
+        (unsigned long)s_ball.accepted_frames,
+        (unsigned long)s_ball.rejected_frames,
         (unsigned long)s_ball.stable_frame_count,
         BallPositionAction_StateName(s_ball.state),
         (unsigned int)s_ball.servo_pulse_us);
@@ -125,8 +132,8 @@ bool Task3BallSequence_Start(uint32_t start_timestamp_ms)
     Task3_MakeCommand(
         &command,
         TASK3_TARGET_O_X,
-        TASK3_O_TOLERANCE_PX,
-        TASK3_SETTLE_SPEED_PX,
+        TASK3_O_TOLERANCE_MM,
+        TASK3_SETTLE_SPEED_MM_S,
         TASK3_O_STABLE_FRAMES,
         TASK3_O_TIMEOUT_MS);
     if (!BallPositionAction_Start(
@@ -198,7 +205,7 @@ Task3BallSequenceResult_t Task3BallSequence_Update(
         s_motion_started = true;
         if (!Task3_Retarget(
                 TASK3_TARGET_POS5_X,
-                TASK3_POS5_TOLERANCE_PX,
+                TASK3_POS5_TOLERANCE_MM,
                 INT16_MAX,
                 TASK3_POS5_STABLE_FRAMES,
                 TASK3_POS5_TIMEOUT_MS,
@@ -216,8 +223,8 @@ Task3BallSequenceResult_t Task3BallSequence_Update(
     {
         if (!Task3_Retarget(
                 TASK3_TARGET_NEG5_X,
-                TASK3_NEG5_TOLERANCE_PX,
-                TASK3_SETTLE_SPEED_PX,
+                TASK3_NEG5_TOLERANCE_MM,
+                TASK3_SETTLE_SPEED_MM_S,
                 TASK3_NEG5_STABLE_FRAMES,
                 TASK3_NEG5_TIMEOUT_MS,
                 now_ms))
@@ -237,10 +244,11 @@ Task3BallSequenceResult_t Task3BallSequence_Update(
         s_result_locked = true;
         s_state = TASK3_STATE_HOLD_NEG5;
         (void)BSP_Debug_Printf(
-            "T3,FINISH=1,RESULT=PASS,MS=%lu,CX=%ld,ERR=%ld,STABLE=%lu,HOLD=1\r\n",
+            "T3,FINISH=1,RESULT=PASS,MS=%lu,CX=%ld,ERRMM=%ld,VMM=%ld,STABLE=%lu,HOLD=1\r\n",
             (unsigned long)s_result_elapsed_ms,
             (long)s_ball.center_x,
-            (long)s_ball.error_px,
+            (long)s_ball.error_mm,
+            (long)s_ball.velocity_mm_s,
             (unsigned long)s_ball.stable_frame_count);
         return TASK3_BALL_SEQUENCE_RESULT_FINISHED;
     }

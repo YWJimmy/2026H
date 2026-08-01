@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include "ball_balance_control_config.h"
+#include "ball_motion_estimator_config.h"
 #include "task2_lap_stop_config.h"
 
 /* Keep Task 5 A-line detection identical to Task 2. */
@@ -14,7 +14,7 @@
 #define TASK5_A_LINE_REQUIRED_FRAMES          TASK2_A_LINE_REQUIRED_FRAMES
 
 #define TASK5_POST_LINE_DISTANCE_MM           ((uint32_t)300U)
-#define TASK5_BALL_TARGET_X                   BALL_BALANCE_TARGET_CX_B
+#define TASK5_BALL_TARGET_X                   BALL_CALIBRATION_ORIGIN_PX
 
 #define TASK5_STOP_DECEL_MM_S2                ((int32_t)300)
 #define TASK5_STOP_JERK_MM_S3                 ((int32_t)1500)

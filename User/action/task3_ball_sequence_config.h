@@ -7,10 +7,10 @@
 #define TASK3_TARGET_POS5_X               ((int32_t)869)
 #define TASK3_TARGET_NEG5_X               ((int32_t)447)
 
-#define TASK3_O_TOLERANCE_PX              ((int32_t)32)
-#define TASK3_POS5_TOLERANCE_PX           ((int32_t)30)
-#define TASK3_NEG5_TOLERANCE_PX           ((int32_t)43)
-#define TASK3_SETTLE_SPEED_PX              ((int32_t)2)
+#define TASK3_O_TOLERANCE_MM              ((int32_t)7)
+#define TASK3_POS5_TOLERANCE_MM           ((int32_t)7)
+#define TASK3_NEG5_TOLERANCE_MM           ((int32_t)10)
+#define TASK3_SETTLE_SPEED_MM_S            ((int32_t)15)
 
 #define TASK3_O_STABLE_FRAMES             ((uint8_t)3U)
 #define TASK3_POS5_STABLE_FRAMES          ((uint8_t)1U)
