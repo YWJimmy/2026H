@@ -1,7 +1,6 @@
 #include "ball_position_action.h"
 
 #include "ball_motion_estimator.h"
-#include "ball_motion_estimator_config.h"
 #include "ball_position_action_config.h"
 #include "ball_dynamics_model.h"
 #include "vision.h"
@@ -60,7 +59,6 @@ static bool BallPosition_CommandValid(
            (command->settle_speed_mm_s >= 0) &&
            (command->stable_frames > 0U) &&
            (command->capture_frames > 0U) &&
-           (command->capture_min_score_milli <= 1000U) &&
            (command->capture_max_spread_mm >= 0);
 }
 
@@ -99,8 +97,6 @@ void BallPositionAction_DefaultCommand(
         BALL_POSITION_DEFAULT_SETTLE_SPEED_MM_S;
     command->stable_frames = BALL_POSITION_DEFAULT_STABLE_FRAMES;
     command->capture_frames = BALL_POSITION_CAPTURE_FRAMES;
-    command->capture_min_score_milli =
-        BALL_POSITION_CAPTURE_MIN_SCORE_MILLI;
     command->capture_max_spread_mm =
         BALL_POSITION_CAPTURE_MAX_SPREAD_MM;
     command->vision_timeout_ms =
@@ -169,7 +165,8 @@ bool BallPositionAction_Start(
     s_status.start_timestamp_ms = now_ms;
     s_status.target_timestamp_ms = now_ms;
     s_status.last_found_timestamp_ms = now_ms;
-    s_status.servo_pulse_us = 1700U;
+    s_status.servo_pulse_us =
+        BallDynamicsModel_AngleToPulseUs(0);
     BallPosition_ResetTargetState(now_ms);
 
     if (s_status.target_locked)
@@ -222,10 +219,6 @@ static bool BallPosition_UpdateCapture(void)
     int32_t target_um;
 
     if (!s_motion.measurement_accepted ||
-        (((s_motion.confidence_milli != 0U) ||
-          (BALL_ESTIMATOR_ACCEPT_ZERO_SCORE == 0U)) &&
-         (s_motion.confidence_milli <
-          s_command.capture_min_score_milli)) ||
         (BallPosition_AbsI32(s_motion.velocity_um_s) >
          BALL_POSITION_CAPTURE_MAX_SPEED_MM_S * 1000))
     {

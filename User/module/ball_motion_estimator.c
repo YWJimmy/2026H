@@ -127,10 +127,8 @@ bool BallMotionEstimator_Update(
         return true;
     }
 
-    if ((frame == NULL) || !frame->found ||
-        (((frame->score_milli != 0U) ||
-          (BALL_ESTIMATOR_ACCEPT_ZERO_SCORE == 0U)) &&
-         (frame->score_milli < BALL_ESTIMATOR_MIN_SCORE_MILLI)))
+    /* During initial tuning every found frame is usable. */
+    if ((frame == NULL) || !frame->found)
     {
         s_state.rejected_frames++;
         return true;

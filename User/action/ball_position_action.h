@@ -33,7 +33,6 @@ typedef struct
     int32_t settle_speed_mm_s;
     uint8_t stable_frames;
     uint8_t capture_frames;
-    uint16_t capture_min_score_milli;
     int32_t capture_max_spread_mm;
     uint32_t vision_timeout_ms;
     uint32_t move_timeout_ms;

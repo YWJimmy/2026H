@@ -9,7 +9,6 @@
 #define BALL_POSITION_DEFAULT_VISION_TIMEOUT_MS     ((uint32_t)500U)
 
 #define BALL_POSITION_CAPTURE_FRAMES                ((uint8_t)5U)
-#define BALL_POSITION_CAPTURE_MIN_SCORE_MILLI       ((uint16_t)700U)
 #define BALL_POSITION_CAPTURE_MAX_SPREAD_MM         ((int32_t)4)
 #define BALL_POSITION_CAPTURE_MAX_SPEED_MM_S        ((int32_t)20)
 

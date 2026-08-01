@@ -9,9 +9,6 @@
 #define BALL_CALIBRATION_NEG_SPAN_PX            ((int32_t)206)
 #define BALL_CALIBRATION_SPAN_UM                 ((int32_t)50000)
 
-#define BALL_ESTIMATOR_MIN_SCORE_MILLI           ((uint16_t)600U)
-/* Current camera firmware uses 0 when confidence is unavailable. */
-#define BALL_ESTIMATOR_ACCEPT_ZERO_SCORE          1U
 #define BALL_ESTIMATOR_ALPHA_Q10                 ((int32_t)768)
 #define BALL_ESTIMATOR_BETA_Q10                  ((int32_t)128)
 #define BALL_ESTIMATOR_Q_SHIFT                   10
