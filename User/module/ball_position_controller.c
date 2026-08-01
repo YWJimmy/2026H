@@ -185,7 +185,8 @@ bool BallPositionController_Update(
         s_status.at_rest =
             (BallController_AbsI32(s_status.position_error_um) <=
              s_tolerance_um) &&
-            (BallController_AbsI32(motion->velocity_um_s) <=
+            (BallController_AbsI32(
+                 motion->measured_velocity_um_s) <=
              s_velocity_tolerance_um_s);
 
         desired_accel =
@@ -194,13 +195,13 @@ bool BallPositionController_Update(
               (1000LL << BALL_CONTROLLER_Q_SHIFT));
         desired_accel -=
             (((int64_t)BALL_CONTROLLER_KV_Q10 *
-              motion->velocity_um_s) /
+              motion->measured_velocity_um_s) /
              (1000LL << BALL_CONTROLLER_Q_SHIFT));
         s_status.stuck_compensation_mm_s2 =
             BallController_StuckCompensation(
                 now_ms,
                 s_status.position_error_um,
-                motion->velocity_um_s);
+                motion->measured_velocity_um_s);
         desired_accel += s_status.stuck_compensation_mm_s2;
 
         /*

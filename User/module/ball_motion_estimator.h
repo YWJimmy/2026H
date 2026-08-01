@@ -22,6 +22,7 @@ typedef struct
     uint32_t rejected_frames;
     int32_t center_x_px;
     int32_t position_um;
+    int32_t measured_velocity_um_s;
     int32_t velocity_um_s;
     int32_t model_accel_um_s2;
     uint16_t confidence_milli;

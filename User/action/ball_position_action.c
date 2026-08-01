@@ -219,7 +219,8 @@ static bool BallPosition_UpdateCapture(void)
     int32_t target_um;
 
     if (!s_motion.measurement_accepted ||
-        (BallPosition_AbsI32(s_motion.velocity_um_s) >
+        (BallPosition_AbsI32(
+             s_motion.measured_velocity_um_s) >
          BALL_POSITION_CAPTURE_MAX_SPEED_MM_S * 1000))
     {
         s_status.capture_frame_count = 0U;
@@ -280,7 +281,8 @@ static void BallPosition_CopyStatus(void)
     s_status.position_mm = s_motion.position_um / 1000;
     s_status.error_mm =
         (s_motion.position_um - s_target_position_um) / 1000;
-    s_status.velocity_mm_s = s_motion.velocity_um_s / 1000;
+    s_status.velocity_mm_s =
+        s_motion.measured_velocity_um_s / 1000;
     s_status.estimated_accel_mm_s2 = s_motion.model_accel_um_s2 / 1000;
     s_status.chassis_ff_accel_mm_s2 =
         s_control.chassis_axis_accel_mm_s2;
@@ -363,7 +365,8 @@ BallPositionActionResult_t BallPositionAction_Update(uint32_t now_ms)
         if ((BallPosition_AbsI32(
                  s_motion.position_um - s_target_position_um) <=
              s_command.tolerance_mm * 1000) &&
-            (BallPosition_AbsI32(s_motion.velocity_um_s) <=
+            (BallPosition_AbsI32(
+                 s_motion.measured_velocity_um_s) <=
              s_command.settle_speed_mm_s * 1000))
         {
             s_status.stable_frame_count++;

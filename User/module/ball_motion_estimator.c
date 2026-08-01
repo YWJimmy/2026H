@@ -143,6 +143,7 @@ bool BallMotionEstimator_Update(
     {
         s_state.valid = true;
         s_state.position_um = measurement_um;
+        s_state.measured_velocity_um_s = 0;
         s_state.velocity_um_s = 0;
         s_previous_measurement_um = measurement_um;
     }
@@ -159,6 +160,7 @@ bool BallMotionEstimator_Update(
         if (frame_dt_ms > BALL_ESTIMATOR_MAX_FRAME_DT_MS)
         {
             s_state.position_um = measurement_um;
+            s_state.measured_velocity_um_s = 0;
             s_state.velocity_um_s = 0;
         }
         else
@@ -167,6 +169,14 @@ bool BallMotionEstimator_Update(
                 ((int64_t)(measurement_um -
                            s_previous_measurement_um) * 1000LL) /
                 (int64_t)frame_dt_ms);
+            s_state.measured_velocity_um_s =
+                BallEstimator_ClampI64(
+                    (((int64_t)s_state.measured_velocity_um_s *
+                      (1024 -
+                       BALL_ESTIMATOR_MEASURED_VELOCITY_Q10)) +
+                     ((int64_t)measured_velocity_um_s *
+                      BALL_ESTIMATOR_MEASURED_VELOCITY_Q10)) >>
+                    BALL_ESTIMATOR_Q_SHIFT);
             residual_um = measurement_um - s_state.position_um;
             if (BallEstimator_AbsI32(residual_um) >
                 BALL_ESTIMATOR_MAX_RESIDUAL_UM)
