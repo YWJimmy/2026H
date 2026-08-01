@@ -11,6 +11,7 @@
 
 #define BALL_ESTIMATOR_ALPHA_Q10                 ((int32_t)768)
 #define BALL_ESTIMATOR_BETA_Q10                  ((int32_t)128)
+#define BALL_ESTIMATOR_MEASURED_VELOCITY_Q10     ((int32_t)768)
 #define BALL_ESTIMATOR_Q_SHIFT                   10
 #define BALL_ESTIMATOR_MIN_FRAME_DT_MS           ((uint32_t)5U)
 #define BALL_ESTIMATOR_MAX_FRAME_DT_MS           ((uint32_t)150U)

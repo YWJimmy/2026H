@@ -7,6 +7,7 @@
 #include <string.h>
 
 static BallMotionState_t s_state;
+static int32_t s_previous_measurement_um = 0;
 
 static int32_t BallEstimator_ClampI64(int64_t value)
 {
@@ -57,6 +58,7 @@ int32_t BallMotionEstimator_PositionUmToPixel(int32_t position_um)
 bool BallMotionEstimator_Init(uint32_t now_ms)
 {
     memset(&s_state, 0, sizeof(s_state));
+    s_previous_measurement_um = 0;
     s_state.initialized = true;
     s_state.timestamp_ms = now_ms;
     return true;
@@ -112,6 +114,7 @@ bool BallMotionEstimator_Update(
 {
     int32_t measurement_um;
     int32_t residual_um;
+    int32_t measured_velocity_um_s;
     uint32_t frame_dt_ms;
     int64_t correction;
 
@@ -141,6 +144,7 @@ bool BallMotionEstimator_Update(
         s_state.valid = true;
         s_state.position_um = measurement_um;
         s_state.velocity_um_s = 0;
+        s_previous_measurement_um = measurement_um;
     }
     else
     {
@@ -159,6 +163,10 @@ bool BallMotionEstimator_Update(
         }
         else
         {
+            measured_velocity_um_s = BallEstimator_ClampI64(
+                ((int64_t)(measurement_um -
+                           s_previous_measurement_um) * 1000LL) /
+                (int64_t)frame_dt_ms);
             residual_um = measurement_um - s_state.position_um;
             if (BallEstimator_AbsI32(residual_um) >
                 BALL_ESTIMATOR_MAX_RESIDUAL_UM)
@@ -177,6 +185,12 @@ bool BallMotionEstimator_Update(
                  (int64_t)frame_dt_ms) >> BALL_ESTIMATOR_Q_SHIFT;
             s_state.velocity_um_s = BallEstimator_ClampI64(
                 (int64_t)s_state.velocity_um_s + correction);
+            s_state.velocity_um_s = BallEstimator_ClampI64(
+                (((int64_t)s_state.velocity_um_s *
+                  (1024 - BALL_ESTIMATOR_MEASURED_VELOCITY_Q10)) +
+                 ((int64_t)measured_velocity_um_s *
+                  BALL_ESTIMATOR_MEASURED_VELOCITY_Q10)) >>
+                BALL_ESTIMATOR_Q_SHIFT);
         }
     }
 
@@ -184,6 +198,7 @@ bool BallMotionEstimator_Update(
     s_state.confidence_milli = frame->score_milli;
     s_state.vision_sequence = vision_sequence;
     s_state.measurement_timestamp_ms = frame_timestamp_ms;
+    s_previous_measurement_um = measurement_um;
     s_state.measurement_accepted = true;
     s_state.accepted_frames++;
     return true;
