@@ -26,6 +26,9 @@ static int32_t s_center_speed_mm_s =
     LINE_FOLLOW_CONTROL_CENTER_SPEED_MM_S;
 static int32_t s_min_base_speed_mm_s =
     LINE_FOLLOW_CONTROL_MIN_BASE_SPEED_MM_S;
+static uint32_t s_lost_command_hold_ms = 0U;
+static int32_t s_lost_hold_base_mm_s = 0;
+static int32_t s_lost_hold_turn_mm_s = 0;
 
 static uint32_t s_state_start_ms = 0U;
 static uint32_t s_last_normal_update_ms = 0U;
@@ -494,15 +497,42 @@ static bool LineFollowControl_HandleNormal(
 
 static bool LineFollowControl_HandleLost(uint32_t now_ms)
 {
+    bool entering_lost;
+
     if (s_status.mode == LINE_FOLLOW_CONTROL_MODE_WAITING_LINE)
     {
         LineFollowControl_ResetStartupGate();
         return LineFollowControl_SetBaseTurnTargets(0, 0);
     }
 
+    entering_lost =
+        s_status.mode != LINE_FOLLOW_CONTROL_MODE_LOST_SEARCH;
+    if (entering_lost)
+    {
+        s_lost_hold_base_mm_s = s_base_speed_ramped_mm_s;
+        s_lost_hold_turn_mm_s = s_correction_ramped_mm_s;
+        LineFollowControl_ResetPd();
+        LineFollowControl_ResetErrorFilter();
+        /* Preserve the turn state for a smooth reacquisition after the hold. */
+        s_correction_ramped_mm_s = s_lost_hold_turn_mm_s;
+    }
+
     LineFollowControl_EnterMode(
         LINE_FOLLOW_CONTROL_MODE_LOST_SEARCH,
         now_ms);
+
+    if ((s_lost_command_hold_ms > 0U) &&
+        (s_status.state_elapsed_ms <= s_lost_command_hold_ms))
+    {
+        s_status.base_speed_mm_s = s_lost_hold_base_mm_s;
+        s_status.correction_target_mm_s = s_lost_hold_turn_mm_s;
+        s_status.correction_mm_s = s_lost_hold_turn_mm_s;
+        s_status.last_search_direction = s_last_search_direction;
+        return LineFollowControl_SetBaseTurnTargets(
+            s_lost_hold_base_mm_s,
+            s_lost_hold_turn_mm_s);
+    }
+
     LineFollowControl_ResetPd();
     LineFollowControl_ResetErrorFilter();
 
@@ -579,6 +609,9 @@ bool LineFollowControl_Init(void)
         LINE_FOLLOW_CONTROL_CENTER_SPEED_MM_S;
     s_min_base_speed_mm_s =
         LINE_FOLLOW_CONTROL_MIN_BASE_SPEED_MM_S;
+    s_lost_command_hold_ms = 0U;
+    s_lost_hold_base_mm_s = 0;
+    s_lost_hold_turn_mm_s = 0;
     s_state_start_ms = HAL_GetTick();
     s_last_normal_update_ms = 0U;
 
@@ -629,6 +662,9 @@ bool LineFollowControl_Start(void)
     s_last_search_direction = 0;
     s_correction_ramped_mm_s = 0;
     s_base_speed_ramped_mm_s = s_center_speed_mm_s;
+    s_lost_command_hold_ms = 0U;
+    s_lost_hold_base_mm_s = 0;
+    s_lost_hold_turn_mm_s = 0;
     s_last_normal_update_ms = 0U;
 
     LineFollowControl_ResetErrorFilter();
@@ -679,6 +715,23 @@ bool LineFollowControl_SetBaseSpeedRangeMmps(
     }
     s_status.center_speed_limit_mm_s = center_speed_mm_s;
     s_status.min_base_speed_mm_s = minimum_speed_mm_s;
+    return true;
+}
+
+bool LineFollowControl_SetLostCommandHoldMs(uint32_t hold_ms)
+{
+    if ((!s_initialized) ||
+        (hold_ms > LINE_FOLLOW_CONTROL_LOST_TIMEOUT_MS))
+    {
+        return false;
+    }
+
+    s_lost_command_hold_ms = hold_ms;
+    if (hold_ms == 0U)
+    {
+        s_lost_hold_base_mm_s = 0;
+        s_lost_hold_turn_mm_s = 0;
+    }
     return true;
 }
 

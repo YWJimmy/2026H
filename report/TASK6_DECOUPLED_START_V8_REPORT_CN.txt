@@ -1,0 +1,99 @@
+Task6 解耦启动 V8：实现与实车复测说明
+=====================================
+
+一、V7 回归证据
+--------------
+
+V4 14:22 与 V7 15:42 两份真实日志使用同一分析器比较：
+
+- 起步绝对误差峰值：24 mm -> 30 mm；
+- 全程误差峰值：24 mm -> 61 mm；
+- 舵机最大相邻跳变：390 us -> 606 us；
+- 显著方向反转：25 次 -> 33 次；
+- 圈时：18.274 s -> 20.134 s。
+
+V7 前 6 s 的 30 个 T6CTRL 报告点中有 14 个控制输出饱和，饱和方向
+反转 6 次。典型链条为：
+
+- 971 ms：ERRMM=+6，底盘速度被 guard 压到 80/60，FF=-169；
+- 1200 ms：PULSE=1270，FF=-220，CTRL=-380；
+- 1400 ms：VF=-323，CTRL 翻转为 +300；
+- 1600 ms：小球越过目标到 ERRMM=-30。
+
+根因不是单独的舵机更新频率，而是 V7 同时使用强前馈、强恢复和根据球
+状态突变的底盘速度。球控制和底盘惯性形成耦合过校正，继而进入极限环。
+
+二、V8 控制边界
+--------------
+
+V8 以 V4 实车稳定性为基线，只保留 V6 中独立成立的静止预载执行修复：
+
+1. 恢复 V4 同一视觉帧下对完整闭环目标的受限推进，删除 V7 的
+   T4Ball_ApplyFeedforwardIncrement 和已应用前馈状态。
+2. 恢复 V4 启动瞬态尺度：
+   - HOLD 位置/阻尼：700/1000；
+   - RAMP 位置/阻尼：750/1150；
+   - HOLD/RAMP/RECOVER 舵机步长：10/16/42 us。
+3. 使用温和、可执行的主动预载：
+   - 静止预载 70 us，步长 18 us，上限 90 us；
+   - 启动斜坡预载 90 us，前馈步长 24 us，上限 120 us；
+   - 保留 START_HOLD 在底盘时间戳不前进时仍继续推进舵机的旁路。
+4. 完全删除球误差/球速度驱动的底盘速度 guard。
+5. 底盘速度只按时间从 60/50 连续上升到巡航值，标称斜坡 2200 ms。
+6. 静止预载最短等待由 100 ms 改为 300 ms，超时为 700 ms。
+
+三、固件和日志身份
+----------------
+
+下一份串口日志必须包含：
+
+T6,START=1,CTRL=T6_DECOUPLED_START_V8,...
+T6GAIN,...,PRE=<us>,COUPLED=0
+T6CTRL,...,CHASE=1
+
+其中 COUPLED=0 证明球状态不会改变启动底盘速度；CHASE=1 证明恢复了
+V4 闭环追赶路径。
+
+四、主机验证
+------------
+
+完成红/绿循环：
+
+- validate_task6_decoupled_start_v8.py 在 V7 源码上首先失败；
+- 修改后输出 TASK6 DECOUPLED START V8 VALIDATION PASS；
+- test_task6_log_analyzer.py 通过；
+- compare_task6_logs.py 继续稳定复现 V7 相对 V4 的 RESULT=WORSE。
+
+最后一项不会因为静态源码修改自动变绿。只有获取 V8 实车日志后，才能用
+V4 作为 baseline、V8 作为 candidate 验证 RESULT=NOT_WORSE。
+
+五、Keil 全量构建
+----------------
+
+构建结果：0 Error(s), 1 Warning(s)
+唯一警告：SUPPORT EXPIRED, NEW PRODUCT SERIAL NUMBER REQUIRED
+Program Size：Code=58206，RO-data=3538，RW-data=828，ZI-data=13276
+
+固件：MDK-ARM\2026H\2026H.hex
+SHA256：8500AB960FD46D99A1DC34D95F58146A4E37EB84295C0472A6A8B6D9A552F237
+
+六、实车验收步骤
+----------------
+
+1. 烧录上述 SHA256 对应的 HEX。
+2. 从按下 Task6 启动键之前开始抓取完整串口。
+3. 先确认 T6_DECOUPLED_START_V8、COUPLED=0、CHASE=1 三个身份字段。
+4. 确认 PRELOAD_READY 早于首个非零 CMD，且 DELTA 约为 -70 us。
+5. 运行完整赛题分析：
+
+python host_tests\analyze_task6_log.py <V8完整日志.txt> \
+  --require-pass --require-stable-servo
+
+6. 运行 V4 差分：
+
+python host_tests\compare_task6_logs.py <V4日志.txt> <V8日志.txt> \
+  --require-not-worse
+
+最终实车通过要求：MAX_ERR_MM<=10、VIOL=0、LAP<=30000 ms，且不出现
+servo_oscillation。当前完成的是源码与构建交付，尚未获得 V8 实车证据，
+不能宣称物理指标已通过。

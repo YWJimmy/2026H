@@ -209,9 +209,23 @@
 #define T4_BALL_STOP_SETTLE_SLEW_US                 ((int32_t)16)
 #define T4_BALL_STOP_SETTLE_RECOVER_SLEW_US         ((int32_t)36)
 
-#define T4_BALL_START_RAMP_FF_MIN_SCALE_MILLI       ((int32_t)350)
-#define T4_BALL_START_RAMP_FF_LIMIT_US              ((int32_t)90)
-#define T4_BALL_START_RAMP_FF_STEP_US               ((int32_t)12)
+/*
+ * Startup pre-load: pulse decrease is the observed correction direction for
+ * launch rollback. Pre-load before wheel motion, keep a moderate floor during
+ * the first part of the ramp, then release it smoothly before steady running.
+ */
+#define T4_BALL_START_HOLD_PRELOAD_US               ((int32_t)70)
+#define T4_BALL_START_HOLD_FF_LIMIT_US              ((int32_t)90)
+#define T4_BALL_START_HOLD_FF_STEP_US               ((int32_t)18)
+#define T4_BALL_START_PRELOAD_READY_TOLERANCE_US    ((int32_t)12)
+#define T4_BALL_START_PRELOAD_READY_MAX_ERROR_MM    ((int32_t)5)
+#define T4_BALL_START_PRELOAD_READY_MAX_VEL_PX_S    ((int32_t)120)
+#define T4_BALL_START_RAMP_FF_MIN_SCALE_MILLI       ((int32_t)650)
+#define T4_BALL_START_RAMP_FF_LIMIT_US              ((int32_t)120)
+#define T4_BALL_START_RAMP_FF_STEP_US               ((int32_t)24)
+#define T4_BALL_START_RAMP_PRELOAD_FULL_US          ((int32_t)90)
+#define T4_BALL_START_RAMP_PRELOAD_FULL_END_MILLI   ((int32_t)250)
+#define T4_BALL_START_RAMP_PRELOAD_RELEASE_MILLI    ((int32_t)850)
 #define T4_BALL_STOP_APPROACH_FF_SCALE_MILLI        ((int32_t)900)
 #define T4_BALL_STOP_APPROACH_FF_LIMIT_US           ((int32_t)120)
 #define T4_BALL_STOP_APPROACH_FF_STEP_US            ((int32_t)18)
@@ -498,6 +512,8 @@ static bool T4Ball_WritePulse(int32_t desired_pulse_us,
     }
 
     s_t4_ball_status.servo_pulse_us = (uint16_t)current_pulse_us;
+    s_t4_ball_status.servo_offset_us =
+        current_pulse_us - T4_BALL_SERVO_CENTER_US;
     s_t4_ball_status.servo_step_limit_us = (uint16_t)maximum_step_us;
     return true;
 }
@@ -513,7 +529,9 @@ static bool T4Ball_UpdateVehicleMotion(void)
     int32_t abs_forward_speed_mm_s;
     int32_t launch_floor_us;
     int32_t transient_ff_scale_milli;
+    int32_t transient_preload_us;
     uint32_t dt_ms;
+    bool chassis_sample_advanced;
 
     uint32_t previous_timestamp_ms =
         s_t4_ball_last_chassis_timestamp_ms;
@@ -522,9 +540,12 @@ static bool T4Ball_UpdateVehicleMotion(void)
     {
         return false;
     }
-    if ((previous_timestamp_ms != 0U) &&
-        (s_t4_ball_chassis_status.timestamp_ms ==
-         previous_timestamp_ms))
+    chassis_sample_advanced =
+        (previous_timestamp_ms == 0U) ||
+        (s_t4_ball_chassis_status.timestamp_ms != previous_timestamp_ms);
+    if ((!chassis_sample_advanced) &&
+        (s_t4_ball_transient_mode !=
+         TASK4_MAIN_BALL_TRANSIENT_START_HOLD))
     {
         return false;
     }
@@ -533,7 +554,8 @@ static bool T4Ball_UpdateVehicleMotion(void)
         (s_t4_ball_chassis_status.left_measured_mm_s +
          s_t4_ball_chassis_status.right_measured_mm_s) / 2;
 
-    if ((s_t4_ball_last_chassis_timestamp_ms != 0U) &&
+    if (chassis_sample_advanced &&
+        (s_t4_ball_last_chassis_timestamp_ms != 0U) &&
         (s_t4_ball_chassis_status.timestamp_ms >
          s_t4_ball_last_chassis_timestamp_ms))
     {
@@ -552,13 +574,16 @@ static bool T4Ball_UpdateVehicleMotion(void)
         }
     }
 
-    s_t4_ball_last_chassis_timestamp_ms =
-        s_t4_ball_chassis_status.timestamp_ms;
-    s_t4_ball_previous_forward_speed_mm_s =
-        measured_forward_speed_mm_s;
-    s_t4_ball_filtered_measured_accel_mm_s2 =
-        (s_t4_ball_filtered_measured_accel_mm_s2 * 3 +
-         measured_accel_mm_s2) / 4;
+    if (chassis_sample_advanced)
+    {
+        s_t4_ball_last_chassis_timestamp_ms =
+            s_t4_ball_chassis_status.timestamp_ms;
+        s_t4_ball_previous_forward_speed_mm_s =
+            measured_forward_speed_mm_s;
+        s_t4_ball_filtered_measured_accel_mm_s2 =
+            (s_t4_ball_filtered_measured_accel_mm_s2 * 3 +
+             measured_accel_mm_s2) / 4;
+    }
 
     feedforward_target_us = T4_BALL_ACCEL_FF_SIGN *
         (s_t4_ball_chassis_status.forward_accel_mm_s2 /
@@ -629,9 +654,16 @@ static bool T4Ball_UpdateVehicleMotion(void)
     switch (s_t4_ball_transient_mode)
     {
         case TASK4_MAIN_BALL_TRANSIENT_START_HOLD:
-            feedforward_target_us = 0;
-            feedforward_step_us = T4_BALL_TRANSIENT_FF_ZERO_STEP_US;
-            feedforward_limit_us = 30;
+            /*
+             * Do not wait horizontally. Move the tray toward the launch
+             * correction direction before the wheels start, so gravity is
+             * already countering the first inertial rollback.
+             */
+            feedforward_target_us = -T4_BALL_START_HOLD_PRELOAD_US;
+            feedforward_step_us = T4_BALL_START_HOLD_FF_STEP_US;
+            feedforward_limit_us = T4_BALL_START_HOLD_FF_LIMIT_US;
+            s_t4_ball_status.startup_guard_us =
+                T4_BALL_START_HOLD_PRELOAD_US;
             break;
 
         case TASK4_MAIN_BALL_TRANSIENT_START_RAMP:
@@ -646,6 +678,31 @@ static bool T4Ball_UpdateVehicleMotion(void)
                 feedforward_target_us,
                 transient_ff_scale_milli,
                 T4_BALL_TRANSIENT_ONE_MILLI);
+
+            transient_preload_us = 0;
+            if (s_t4_ball_transient_progress_milli <=
+                T4_BALL_START_RAMP_PRELOAD_FULL_END_MILLI)
+            {
+                transient_preload_us =
+                    T4_BALL_START_RAMP_PRELOAD_FULL_US;
+            }
+            else if (s_t4_ball_transient_progress_milli <
+                     T4_BALL_START_RAMP_PRELOAD_RELEASE_MILLI)
+            {
+                transient_preload_us = T4Ball_MulDivI32(
+                    T4_BALL_START_RAMP_PRELOAD_FULL_US,
+                    T4_BALL_START_RAMP_PRELOAD_RELEASE_MILLI -
+                        s_t4_ball_transient_progress_milli,
+                    T4_BALL_START_RAMP_PRELOAD_RELEASE_MILLI -
+                        T4_BALL_START_RAMP_PRELOAD_FULL_END_MILLI);
+            }
+
+            if ((transient_preload_us > 0) &&
+                (feedforward_target_us > -transient_preload_us))
+            {
+                feedforward_target_us = -transient_preload_us;
+            }
+            s_t4_ball_status.startup_guard_us = transient_preload_us;
             feedforward_step_us = T4_BALL_START_RAMP_FF_STEP_US;
             feedforward_limit_us = T4_BALL_START_RAMP_FF_LIMIT_US;
             break;
@@ -676,6 +733,7 @@ static bool T4Ball_UpdateVehicleMotion(void)
 
         case TASK4_MAIN_BALL_TRANSIENT_NONE:
         default:
+            s_t4_ball_status.startup_guard_us = 0;
             break;
     }
 
@@ -814,11 +872,28 @@ bool Task4MainBall_IsTargetLocked(void)
     return s_t4_ball_initialized && s_t4_ball_status.target_locked;
 }
 
+bool Task4MainBall_IsStartupPreloadReady(void)
+{
+    int32_t minimum_preload_us =
+        T4_BALL_START_HOLD_PRELOAD_US -
+        T4_BALL_START_PRELOAD_READY_TOLERANCE_US;
+
+    return s_t4_ball_initialized &&
+        s_t4_ball_status.target_locked &&
+        s_t4_ball_status.vision_valid &&
+        (s_t4_ball_transient_mode ==
+         TASK4_MAIN_BALL_TRANSIENT_START_HOLD) &&
+        (s_t4_ball_status.servo_offset_us <= -minimum_preload_us) &&
+        (T4Ball_AbsI32(s_t4_ball_status.error_mm) <=
+         T4_BALL_START_PRELOAD_READY_MAX_ERROR_MM) &&
+        (T4Ball_AbsI32(s_t4_ball_status.filtered_velocity_px_s) <=
+         T4_BALL_START_PRELOAD_READY_MAX_VEL_PX_S);
+}
+
 void Task4MainBall_SetTransient(Task4MainBallTransient_t transient_mode,
                                 int32_t progress_milli)
 {
-    if ((transient_mode < TASK4_MAIN_BALL_TRANSIENT_NONE) ||
-        (transient_mode > TASK4_MAIN_BALL_TRANSIENT_STOP_SETTLE))
+    if (transient_mode > TASK4_MAIN_BALL_TRANSIENT_STOP_SETTLE)
     {
         transient_mode = TASK4_MAIN_BALL_TRANSIENT_NONE;
     }
@@ -836,7 +911,7 @@ void Task4MainBall_SetTransient(Task4MainBallTransient_t transient_mode,
         if ((transient_mode == TASK4_MAIN_BALL_TRANSIENT_START_HOLD) ||
             (transient_mode == TASK4_MAIN_BALL_TRANSIENT_START_RAMP))
         {
-            /* Task 6 uses a speed ramp instead of the legacy launch kick. */
+            /* Task 6 uses its own moderate preload instead of -140 us kick. */
             s_t4_ball_launch_active = false;
             s_t4_ball_launch_start_ms = 0U;
         }
@@ -1057,8 +1132,8 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
             s_t4_ball_last_error_sign = 0;
             s_t4_ball_cross_brake_frames = 0U;
             s_t4_ball_status.cross_brake_frames = 0U;
-            /* Task 6 capture uses the explicit startup transient, not
-             * the legacy -140 us launch floor used by fixed-target tasks. */
+            /* Task 6 capture uses a moderate explicit startup preload,
+             * not the legacy immediate -140 us launch floor. */
             s_t4_ball_launch_active = false;
             s_t4_ball_launch_start_ms = 0U;
             s_t4_ball_status.mode = TASK4_MAIN_BALL_MODE_HOLD;

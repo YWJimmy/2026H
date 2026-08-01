@@ -1,0 +1,118 @@
+Task6 帧同步舵机控制 V7：诊断、修复与复测说明
+================================================
+
+一、输入证据
+------------
+
+串口片段：
+D:\xwechat_files\wxid_r7axuynpekjx22_89e4\msg\file\2026-08\test_task6_20260801_1519_片段.txt
+
+该片段从 Task6 的 10.8 s 开始，不含 START、TARGET_LOCK 和
+PRELOAD_READY，因此不能单凭它重建起步 0~3 s 的完整轨迹。但它足以证明
+舵机指令在正常跑圈期间也存在闭环振荡：
+
+- A 点前片段内球位置误差峰值：7 mm；
+- 固件历史锁存值：MAXMM=26、VIOL=1，整圈仍不满足 +/-10 mm；
+- A 点时间：18.347 s，满足 30 s 时间限制；
+- A 点前舵机脉宽范围：1438~1834 us，跨度 396 us；
+- 相邻 200 ms 样本最大跳变：338 us；
+- >=120 us 的大跳变：13 次；
+- >=80 us 显著跳变中的方向反转：14 次；
+- PULSE 与 -VF 的相关系数：0.913；
+- 同期加速度前馈 FF 最大绝对值仅 28 us。
+
+结论：主要振荡由视觉速度阻尼项反号并驱动舵机往返，不是小幅 FF 自身造成。
+
+二、固件身份异常
+----------------
+
+当前目录的 V6 源码在每条 T6GAIN 后都输出 GUARD=，但本次片段中的全部
+T6GAIN 均没有 GUARD=。这说明本次实车日志不是由当前目录的精确 V6 镜像
+产生，或烧录后运行的仍是更早镜像。V7 使用新的唯一标识：
+
+T6,START=1,CTRL=T6_FRAME_SYNC_SERVO_V7,...
+
+后续必须从按键启动前开始完整抓串口，以该标识核对烧录身份。
+
+三、结构性根因
+--------------
+
+Task4MainBall_Update() 的视觉位置和视觉速度只在新视觉帧到来时重新计算，
+但旧实现会在同一视觉序列号下，随着更高频的底盘时间戳更新，反复调用
+T4Ball_WritePulse() 追赶同一个旧闭环目标。
+
+结果是：舵机能在下一视觉帧到来前冲向一侧；下一帧的 VF 变号后，阻尼项
+反号，舵机又快速冲向另一侧。该结构会把视觉速度噪声和量化反号放大为
+肉眼可见的上下大幅抖动。
+
+四、V7 修复
+----------
+
+1. 新视觉帧：位置项、速度阻尼项只允许推进一次舵机。
+2. 同一视觉帧：禁止再次追赶旧的位置/阻尼目标，只增量应用新计算出的
+   加速度前馈。
+3. START_HOLD 期间仍可在车轮不动时逐步建立预载，因此 V6 对“预载只走
+   一步”的修复没有被撤销。
+4. 保留 V6 的自适应起步保护、低速起步和 2200 ms 斜坡参数；本轮不同时
+   改 PID/预载强度，确保实车差异可归因于帧同步修复。
+5. 新增串口诊断：
+   - T6GAIN,...,GUARD=...,FSYNC=1
+   - T6CTRL,POS=...,DAMP=...,CTRL=...,STEP=...,FSYNC=1
+
+五、主机验证
+------------
+
+通过：
+
+- validate_task6_frame_sync_servo_v7.py
+- validate_task6_adaptive_launch_guard_v6.py
+- test_task6_log_analyzer.py
+
+日志分析器新增 --require-stable-servo。暴振判据为：
+
+- 任一相邻短间隔指令跳变 >180 us；或
+- 至少 3 次 >=120 us 大跳变，且至少 3 次显著方向反转。
+
+旧实车片段在该判据下稳定复现 FAIL，形成下一轮实车的红/绿回放基准。
+
+说明：仓库内两个更早的历史静态测试仍与现有工程状态不一致：
+
+- validate_task2_task6_optimization.py 仍要求 Task2 末段 100 mm 字面配置；
+- validate_task4_patch.py / validate_task4_v3_patch.py 仍要求早期 V2/V3/OLED
+  字面实现。
+
+这些失败均位于本次未修改的 Task2/OLED/旧控制契约，不应通过回退当前
+Task6 代码来伪造通过。
+
+六、Keil 全量编译
+----------------
+
+结果：0 Error(s), 1 Warning(s)
+唯一警告：SUPPORT EXPIRED, NEW PRODUCT SERIAL NUMBER REQUIRED
+Program Size：Code=58378，RO-data=3614，RW-data=840，ZI-data=13272
+
+生成固件：MDK-ARM\2026H\2026H.hex
+SHA256：DDA1DE76B0D94AA47C2A4C79588F11BE040C85B323D9DDEC91C810021B3CF6EB
+
+七、实车复测判据
+----------------
+
+1. 烧录上述 SHA256 对应的 2026H.hex。
+2. 串口从按下 Task6 启动键之前开始抓取，不能只截取 10 s 以后。
+3. 首行必须出现 CTRL=T6_FRAME_SYNC_SERVO_V7。
+4. PRELOAD_READY 必须早于首个非零 CMD。
+5. 用以下命令复盘：
+
+python host_tests\analyze_task6_log.py <完整日志.txt> \
+  --require-pass --require-stable-servo
+
+实车最终通过必须同时满足：
+
+- RESULT=PASS；
+- MAX_ERR_MM <= 10 且 VIOL 始终为 0；
+- LAP <= 30000 ms；
+- 不出现 servo_oscillation；
+- 起步 0~3 s 的 startup_peak_abs_error_mm <= 10。
+
+当前结论边界：V7 已完成源码回归和目标板构建，但尚未取得 V7 实车日志，
+因此不能宣称物理验收通过。

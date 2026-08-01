@@ -81,6 +81,10 @@ typedef struct
     uint16_t vision_dt_ms;
     uint16_t servo_step_limit_us;
 
+    /* Actual commanded offset and adaptive Task 6 launch guard. */
+    int32_t servo_offset_us;
+    int32_t startup_guard_us;
+
     uint32_t max_abs_error_px;
     uint32_t max_abs_error_mm;
     uint32_t vision_sequence;
@@ -104,6 +108,8 @@ bool Task4MainBall_InitTarget(int32_t target_x, int32_t target_mm);
 /* Capture the current stable ball position before Task 6 starts driving. */
 bool Task4MainBall_InitCaptureCurrent(void);
 bool Task4MainBall_IsTargetLocked(void);
+/* True only after the commanded servo preload is established and vision is safe. */
+bool Task4MainBall_IsStartupPreloadReady(void);
 /* Task 6 only: select a temporary startup/parking control profile. */
 void Task4MainBall_SetTransient(Task4MainBallTransient_t transient_mode,
                                 int32_t progress_milli);

@@ -74,6 +74,13 @@ bool LineFollowControl_SetBaseSpeedRangeMmps(
     int32_t center_speed_mm_s,
     int32_t minimum_speed_mm_s);
 
+/*
+ * Optional transient lost-line behavior.  A non-zero duration holds the last
+ * normal base/turn command before falling back to bounded low-speed search.
+ * LineFollowControl_Start() resets this option to zero, so tasks must opt in.
+ */
+bool LineFollowControl_SetLostCommandHoldMs(uint32_t hold_ms);
+
 /* 普通用户停止：快速限跃度停车。 */
 bool LineFollowControl_RequestStop(
     LineFollowControlStopReason_t reason);
