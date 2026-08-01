@@ -496,8 +496,14 @@ static bool LineFollowControl_HandleLost(uint32_t now_ms)
 {
     if (s_status.mode == LINE_FOLLOW_CONTROL_MODE_WAITING_LINE)
     {
-        LineFollowControl_ResetStartupGate();
-        return LineFollowControl_SetBaseTurnTargets(0, 0);
+        /* Move straight briefly so a sensor ahead of A can acquire the line. */
+        s_status.base_speed_mm_s =
+            LINE_FOLLOW_CONTROL_STARTUP_BLIND_SPEED_MM_S;
+        s_status.correction_target_mm_s = 0;
+        s_status.correction_mm_s = 0;
+        return LineFollowControl_SetBaseTurnTargets(
+            LINE_FOLLOW_CONTROL_STARTUP_BLIND_SPEED_MM_S,
+            0);
     }
 
     LineFollowControl_EnterMode(
@@ -539,8 +545,18 @@ static bool LineFollowControl_HandleAllBlack(uint32_t now_ms)
 {
     if (s_status.mode == LINE_FOLLOW_CONTROL_MODE_WAITING_LINE)
     {
-        LineFollowControl_ResetStartupGate();
-        return LineFollowControl_SetBaseTurnTargets(0, 0);
+        /* A may initially cover every sensor; drive straight to clear it. */
+        LineFollowControl_EnterMode(
+            LINE_FOLLOW_CONTROL_MODE_ALL_BLACK_PASS,
+            now_ms);
+        LineFollowControl_ResetPd();
+        LineFollowControl_ResetErrorFilter();
+        s_status.base_speed_mm_s =
+            LINE_FOLLOW_CONTROL_ALL_BLACK_SPEED_MM_S;
+        s_status.correction_target_mm_s = 0;
+        return LineFollowControl_SetBaseTurnTargets(
+            LINE_FOLLOW_CONTROL_ALL_BLACK_SPEED_MM_S,
+            0);
     }
 
     LineFollowControl_EnterMode(
@@ -867,6 +883,16 @@ void LineFollowControl_Process(void)
     {
         s_status.state_elapsed_ms =
             (uint32_t)(now_ms - s_state_start_ms);
+    }
+
+    if (s_running &&
+        (s_status.mode == LINE_FOLLOW_CONTROL_MODE_WAITING_LINE) &&
+        (s_status.state_elapsed_ms >=
+         LINE_FOLLOW_CONTROL_STARTUP_BLIND_TIMEOUT_MS))
+    {
+        LineFollowControl_Stop(
+            LINE_FOLLOW_CONTROL_STOP_LOST_NO_DIRECTION);
+        return;
     }
 
     if (s_stopping && Chassis_IsMotionStopped())

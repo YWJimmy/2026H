@@ -6,7 +6,7 @@
 #define BALL_CONTROLLER_PERIOD_MS                   ((uint32_t)10U)
 /* Derived to reach the existing +/-100 us push range near a 50 mm error. */
 #define BALL_CONTROLLER_KP_Q10                      ((int32_t)20480) /* 20.0 s^-2 */
-#define BALL_CONTROLLER_KV_Q10                      ((int32_t)9216)  /* 9.0 s^-1 */
+#define BALL_CONTROLLER_KV_Q10                      ((int32_t)4096)  /* 4.0 s^-1 */
 #define BALL_CONTROLLER_Q_SHIFT                     10
 #define BALL_CONTROLLER_MAX_DESIRED_ACCEL_MM_S2     ((int32_t)1500)
 #define BALL_CONTROLLER_MIN_DRIVE_ACCEL_MM_S2       ((int32_t)1300)

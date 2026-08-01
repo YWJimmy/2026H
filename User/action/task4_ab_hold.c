@@ -11,6 +11,8 @@
 #include "task4_main_ball.h"
 #include "vision.h"
 
+#include <string.h>
+
 typedef enum
 {
     TASK4_STATE_IDLE = 0,
@@ -116,7 +118,7 @@ static void Task4_Report(uint32_t now_ms)
 
     s_last_report_ms = now_ms;
     (void)BSP_Debug_Printf(
-        "T4,ST=%u,MS=%lu,AB=%lu,LOCK=%u,DIST=%lu,B=%ld,CMD=%ld/%ld\r\n",
+        "T4,ST=%u,MS=%lu,AB=%lu,LOCK=%u,DIST=%lu,B=%ld,CMD=%ld/%ld,LS=%s,LM=%s,LSEQ=%lu,VM=0x%02X,MASK=0x%02X,FRESH=%u\r\n",
         (unsigned int)s_state,
         (unsigned long)(now_ms - s_start_ms),
         (unsigned long)(s_ab_time_locked ?
@@ -125,7 +127,13 @@ static void Task4_Report(uint32_t now_ms)
         (unsigned long)s_distance.traveled_mm,
         (long)s_line_control.base_speed_mm_s,
         (long)s_line_control.left_target_mm_s,
-        (long)s_line_control.right_target_mm_s);
+        (long)s_line_control.right_target_mm_s,
+        LineFollow_StateName(s_line_control.line_state),
+        LineFollowControl_ModeName(s_line_control.mode),
+        (unsigned long)s_line_frame.sequence,
+        (unsigned int)s_line_frame.valid_mask,
+        (unsigned int)s_line_frame.black_mask,
+        s_has_fresh_sensor_frame ? 1U : 0U);
     (void)BSP_Debug_Printf(
         "T4BALL,CX=%ld,ERR=%ld,PRED=%ld,VRAW=%ld,VF=%ld,"
         "MODE=%s,PULSE=%u,STEP=%u,BIAS=%ld,POS=%ld,DAMP=%ld,FF=%ld,"
@@ -242,6 +250,7 @@ bool Task4AbHold_Start(uint32_t start_timestamp_ms)
     s_has_fresh_sensor_frame = false;
     s_last_sensor_sequence = 0U;
     s_last_sensor_valid_mask = 0U;
+    memset(&s_line_frame, 0, sizeof(s_line_frame));
 
     (void)BSP_Debug_Printf(
         "T4,START=1,CTRL=MAIN_PREDICTIVE_FF_V2,O_CX=653,TOL_PX=43,"

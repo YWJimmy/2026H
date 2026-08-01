@@ -34,6 +34,8 @@
 #define LINE_FOLLOW_CONTROL_CORRECTION_SLEW_MM_S2    ((int32_t)5000)
 
 /* 启动后收到任意有效非空黑线帧即直接进入巡线，不要求黑线居中。 */
+#define LINE_FOLLOW_CONTROL_STARTUP_BLIND_SPEED_MM_S ((int32_t)100)
+#define LINE_FOLLOW_CONTROL_STARTUP_BLIND_TIMEOUT_MS ((uint32_t)250U)
 
 /* 丢线搜索降低速度并适当延长恢复窗口。 */
 #define LINE_FOLLOW_CONTROL_LOST_SEARCH_SPEED_MM_S   ((int32_t)100)
