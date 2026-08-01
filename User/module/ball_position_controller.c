@@ -202,6 +202,29 @@ bool BallPositionController_Update(
                 s_status.position_error_um,
                 motion->velocity_um_s);
         desired_accel += s_status.stuck_compensation_mm_s2;
+
+        /*
+         * Preserve the proven e2d738b cruise authority outside the target
+         * window.  The model-based velocity term is allowed to command the
+         * opposite sign for braking, but a weak command toward the target
+         * must still overcome rail and servo static friction.
+         */
+        if ((s_status.position_error_um < -s_tolerance_um) &&
+            (desired_accel > 0) &&
+            (desired_accel <
+             BALL_CONTROLLER_MIN_DRIVE_ACCEL_MM_S2))
+        {
+            desired_accel =
+                BALL_CONTROLLER_MIN_DRIVE_ACCEL_MM_S2;
+        }
+        else if ((s_status.position_error_um > s_tolerance_um) &&
+                 (desired_accel < 0) &&
+                 (desired_accel >
+                  -BALL_CONTROLLER_MIN_DRIVE_ACCEL_MM_S2))
+        {
+            desired_accel =
+                -BALL_CONTROLLER_MIN_DRIVE_ACCEL_MM_S2;
+        }
         s_status.desired_ball_accel_mm_s2 =
             BallController_ClampI64(
                 desired_accel,

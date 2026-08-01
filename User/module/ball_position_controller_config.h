@@ -9,6 +9,7 @@
 #define BALL_CONTROLLER_KV_Q10                      ((int32_t)9216)  /* 9.0 s^-1 */
 #define BALL_CONTROLLER_Q_SHIFT                     10
 #define BALL_CONTROLLER_MAX_DESIRED_ACCEL_MM_S2     ((int32_t)1500)
+#define BALL_CONTROLLER_MIN_DRIVE_ACCEL_MM_S2       ((int32_t)1000)
 #define BALL_CONTROLLER_MAX_PULSE_STEP_US            ((int32_t)20)
 
 #define BALL_CONTROLLER_STUCK_SPEED_MM_S             ((int32_t)10)

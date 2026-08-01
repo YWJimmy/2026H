@@ -25,6 +25,9 @@ typedef enum
  */
 bool AppTaskPort_Init(void);
 
+/* Level and enable the ball rail while the selected task is armed. */
+bool AppTaskPort_Prepare(TaskMenuTask_t task);
+
 bool AppTaskPort_Start(
     TaskMenuTask_t task,
     uint32_t start_timestamp_ms);

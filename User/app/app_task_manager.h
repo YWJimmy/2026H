@@ -44,6 +44,7 @@ typedef struct
 } AppTaskManagerStatus_t;
 
 bool AppTaskManager_Init(void);
+bool AppTaskManager_Prepare(TaskMenuTask_t task);
 bool AppTaskManager_Start(
     TaskMenuTask_t task,
     uint32_t start_timestamp_ms);

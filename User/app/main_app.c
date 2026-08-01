@@ -504,6 +504,14 @@ void MainApp_Update(void)
             if (TaskMenuUi_GetState() ==
                 TASK_MENU_STATE_ARMED)
             {
+                if (!AppTaskManager_Prepare(
+                        s_status.selected_task))
+                {
+                    MainApp_EnterFault(
+                        APP_FAULT_TASK_START,
+                        MainApp_GetTaskFaultDetail(5U));
+                    break;
+                }
                 MainApp_SetState(
                     APP_STATE_ARMED,
                     now_ms);
@@ -517,6 +525,7 @@ void MainApp_Update(void)
             if (TaskMenuUi_GetState() ==
                 TASK_MENU_STATE_SELECT)
             {
+                AppTaskManager_Reset();
                 MainApp_SetState(
                     APP_STATE_MENU,
                     now_ms);

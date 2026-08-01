@@ -1,5 +1,6 @@
 #include "app_task_port.h"
 
+#include "ball_dynamics_model.h"
 #include "ball_position_action.h"
 #include "bsp_servo.h"
 #include "chassis.h"
@@ -56,6 +57,30 @@ bool AppTaskPort_Init(void)
     }
 
     s_initialized = true;
+    return true;
+}
+
+bool AppTaskPort_Prepare(TaskMenuTask_t task)
+{
+    if (!s_initialized || s_active ||
+        (task < TASK_MENU_TASK_2_LAP_STOP) ||
+        (task > TASK_MENU_TASK_6_LAP_TARGET))
+    {
+        s_fault_detail = 40U;
+        return false;
+    }
+
+    s_task = task;
+    s_fault_detail = 0U;
+    if (!BSP_Servo_Init() ||
+        !BSP_Servo_SetPulseUs(
+            BallDynamicsModel_AngleToPulseUs(0)) ||
+        !BSP_Servo_Enable())
+    {
+        BSP_Servo_Disable();
+        s_fault_detail = 41U;
+        return false;
+    }
     return true;
 }
 

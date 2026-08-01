@@ -7,6 +7,9 @@
 #include <stddef.h>
 
 static AppTaskManagerStatus_t s_status;
+static bool s_prepared = false;
+static TaskMenuTask_t s_prepared_task =
+    TASK_MENU_TASK_2_LAP_STOP;
 
 static bool AppTaskManager_Elapsed(
     uint32_t now_ms,
@@ -27,6 +30,8 @@ static void AppTaskManager_SetState(
 
 bool AppTaskManager_Init(void)
 {
+    s_prepared = false;
+    s_prepared_task = TASK_MENU_TASK_2_LAP_STOP;
     s_status.initialized = false;
     s_status.state = APP_TASK_MANAGER_IDLE;
     s_status.task = TASK_MENU_TASK_2_LAP_STOP;
@@ -47,6 +52,32 @@ bool AppTaskManager_Init(void)
     return true;
 }
 
+bool AppTaskManager_Prepare(TaskMenuTask_t task)
+{
+    if ((!s_status.initialized) ||
+        ((s_status.state != APP_TASK_MANAGER_IDLE) &&
+         (s_status.state != APP_TASK_MANAGER_FINISHED)))
+    {
+        return false;
+    }
+
+    AppTaskPort_Reset();
+    if (!AppTaskPort_Prepare(task))
+    {
+        AppTaskPort_ForceSafeStop();
+        s_status.fault_detail = AppTaskPort_GetFaultDetail();
+        s_prepared = false;
+        return false;
+    }
+
+    s_status.state = APP_TASK_MANAGER_IDLE;
+    s_status.task = task;
+    s_status.fault_detail = 0U;
+    s_prepared = true;
+    s_prepared_task = task;
+    return true;
+}
+
 bool AppTaskManager_Start(
     TaskMenuTask_t task,
     uint32_t start_timestamp_ms)
@@ -58,13 +89,27 @@ bool AppTaskManager_Start(
         return false;
     }
 
-    AppTaskPort_Reset();
+    if ((!s_prepared) || (s_prepared_task != task))
+    {
+        AppTaskPort_Reset();
+        if (!AppTaskPort_Prepare(task))
+        {
+            AppTaskPort_ForceSafeStop();
+            s_status.fault_detail =
+                AppTaskPort_GetFaultDetail();
+            AppTaskManager_SetState(
+                APP_TASK_MANAGER_FAULT,
+                HAL_GetTick());
+            return false;
+        }
+    }
 
     if (!AppTaskPort_Start(
             task,
             start_timestamp_ms))
     {
         AppTaskPort_ForceSafeStop();
+        s_prepared = false;
         s_status.fault_detail =
             AppTaskPort_GetFaultDetail();
         AppTaskManager_SetState(
@@ -72,6 +117,8 @@ bool AppTaskManager_Start(
             HAL_GetTick());
         return false;
     }
+
+    s_prepared = false;
 
     s_status.task = task;
     s_status.stop_reason = APP_TASK_STOP_NONE;
@@ -283,6 +330,9 @@ bool AppTaskManager_RequestStop(
 void AppTaskManager_Reset(void)
 {
     AppTaskPort_Reset();
+
+    s_prepared = false;
+    s_prepared_task = TASK_MENU_TASK_2_LAP_STOP;
 
     s_status.state = APP_TASK_MANAGER_IDLE;
     s_status.task = TASK_MENU_TASK_2_LAP_STOP;
