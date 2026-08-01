@@ -184,11 +184,6 @@ const char *Task3BallSequence_GetPhaseText(void)
         return s_passed ? "T3 PASS HOLD" : "T3 FAIL HOLD";
     }
 
-    if (!Test_BallBalance_IsTimerRunning())
-    {
-        return "T3 WAIT O";
-    }
-
     return "T3 O +5 -5";
 }
 

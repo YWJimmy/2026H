@@ -72,16 +72,14 @@ static void StartAtCenter(void)
 
     assert(Test_BallBalance_Init());
     assert(g_servo_enabled);
-    assert(g_servo_pulse == 1650U);
-
-    Feed(653U, 50U);
-    Feed(653U, 50U);
-    Feed(653U, 50U);
-    assert(g_servo_pulse == 1750U);
+    /* Task 3 starts toward +5 cm immediately; O is the prescribed start. */
+    assert(g_servo_pulse == 1775U);
 }
 
 static void TestOneShotPass(void)
 {
+    uint32_t neg5_arrival_ms;
+
     StartAtCenter();
 
     Feed(680U, 50U);
@@ -107,12 +105,13 @@ static void TestOneShotPass(void)
     Feed(555U, 50U);
     Feed(510U, 50U);
     Feed(472U, 50U);
+    neg5_arrival_ms = g_tick_ms - 100U;
 
     /* Near -5 cm with leftward speed: brake right, never finish while moving. */
     Feed(455U, 50U);
-    assert(g_servo_pulse > 1650U);
+    assert(g_servo_pulse > 1675U);
     Feed(447U, 50U);
-    assert(g_servo_pulse > 1650U);
+    assert(g_servo_pulse > 1675U);
     assert(!Test_BallBalance_IsFinished());
 
     /* +/-1 cm is acceptable. Finish on the first truly stopped frame. */
@@ -125,10 +124,10 @@ static void TestOneShotPass(void)
 
     assert(Test_BallBalance_IsFinished());
     assert(Test_BallBalance_Passed());
-    assert(g_servo_pulse <= 1650U);
+    assert(g_servo_pulse <= 1675U);
     assert(g_tick_ms - 100U < 5000U);
-    /* Automatic timer starts at actual O-point departure (third center frame). */
-    assert(Test_BallBalance_GetElapsedMs() == g_tick_ms - 250U);
+    /* Timer starts with the command and freezes on first arrival at -5 cm. */
+    assert(Test_BallBalance_GetElapsedMs() == neg5_arrival_ms);
 
     /*
      * PASS time is frozen, but post-finish control must oppose a later drift
@@ -140,18 +139,18 @@ static void TestOneShotPass(void)
         assert(Test_BallBalance_IsFinished());
         assert(Test_BallBalance_Passed());
         assert(Test_BallBalance_GetElapsedMs() == latched_ms);
-        assert(g_servo_pulse < 1650U);
+        assert(g_servo_pulse < 1675U);
 
         Feed(530U, 50U);
         assert(Test_BallBalance_GetElapsedMs() == latched_ms);
-        assert(g_servo_pulse < 1650U);
+        assert(g_servo_pulse < 1675U);
     }
 
     Test_BallBalance_Stop();
     assert(!g_servo_enabled);
 }
 
-static void TestTimeout(void)
+static void TestBudgetOverrunKeepsControl(void)
 {
     StartAtCenter();
 
@@ -160,16 +159,18 @@ static void TestTimeout(void)
         Feed(653U, 50U);
     }
 
-    assert(Test_BallBalance_IsFinished());
+    assert(!Test_BallBalance_IsFinished());
     assert(!Test_BallBalance_Passed());
-    assert(g_servo_pulse == 1650U);
+    assert(Test_BallBalance_IsTimerRunning());
+    assert(Test_BallBalance_GetElapsedMs() > 5000U);
+    assert(g_servo_pulse == 1775U);
     Test_BallBalance_Stop();
 }
 
 int main(void)
 {
     TestOneShotPass();
-    TestTimeout();
+    TestBudgetOverrunKeepsControl();
     puts("task3_optimized: PASS");
     return 0;
 }
