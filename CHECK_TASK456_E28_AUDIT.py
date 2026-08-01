@@ -103,7 +103,7 @@ need('Core/Src/main.c', 'T4_BALL_OFFCENTER_POSITION_SCALE_MILLI      ((int32_t)6
 need('User/action/task6_lap_target.c', 'T6GAIN,SCH=%ld,XSCH=%ld,PG=%ld,VG=%ld,PRED=%ld,DB=%ld,', 'Task6 gain diagnostics')
 need('Core/Src/main.c', 'T4_BALL_EXTREME_SCHEDULE_FULL_MM', 'Task6 extreme target schedule')
 need('Core/Src/main.c', 'T4_BALL_CROSS_BRAKE_FRAMES', 'Task6 crossing brake')
-need('Core/Src/main.c', 'T4_BALL_CROSS_BRAKE_MAX_ERROR_MM', 'Task6 physical crossing boundary')
+need('Core/Src/main.c', 'T4_BALL_CROSS_BRAKE_MAX_ERROR_MM            ((int32_t)6)', 'Task6 6 mm crossing boundary')
 need('Core/Src/main.c', 'T4_BALL_CROSS_MIN_VELOCITY_PX_S', 'Task6 crossing velocity gate')
 need('Core/Src/main.c', 'T4_BALL_CROSS_MAX_FRAME_DELTA_PX', 'Task6 vision jump gate')
 need('Core/Src/main.c', '(abs_error_mm > T4_BALL_ONE_CM_MM) ||', 'Task6 out-of-band recovery')

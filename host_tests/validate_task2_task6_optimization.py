@@ -152,6 +152,11 @@ cross_frames = macro_u8(main_src, "T4_BALL_CROSS_BRAKE_FRAMES")
 cross_min_velocity = macro_i32(main_src, "T4_BALL_CROSS_MIN_VELOCITY_PX_S")
 cross_max_delta = macro_i32(main_src, "T4_BALL_CROSS_MAX_FRAME_DELTA_PX")
 one_cm_mm = macro_i32(main_src, "T4_BALL_ONE_CM_MM")
+cross_brake_limit_mm = macro_i32(
+    main_src, "T4_BALL_CROSS_BRAKE_MAX_ERROR_MM")
+if cross_brake_limit_mm != 6:
+    errors.append(
+        f"crossing brake physical limit is not 6 mm: {cross_brake_limit_mm}")
 
 center_schedule = schedule_for(0, start_mm, full_mm)
 far_schedule = schedule_for(-60, start_mm, full_mm)
@@ -322,7 +327,7 @@ def crossing_step(
         if (
             last_sign != 0
             and current_sign != last_sign
-            and abs(error_mm) <= one_cm_mm
+            and abs(error_mm) <= cross_brake_limit_mm
             and motion_valid
         ):
             counter = cross_frames
@@ -332,7 +337,7 @@ def crossing_step(
         counter = 0
     active = (
         counter > 0
-        and abs(error_mm) <= one_cm_mm
+        and abs(error_mm) <= cross_brake_limit_mm
         and extreme_schedule > 0
         and motion_valid
     )
@@ -354,6 +359,7 @@ if not active or counter != 0:
 
 # Safety and vision-quality gates must cancel or reject braking.
 for label, args in [
+    ("outside six millimeters", (2, -1, -35, -7, -120, -90, -4, 33)),
     ("outside one centimeter", (2, -1, -50, -11, -120, -90, -4, 33)),
     ("invalid timestamp", (0, 1, -9, -2, -200, -120, -7, 0)),
     ("low speed", (0, 1, -9, -2, -20, -15, -1, 33)),
@@ -376,7 +382,7 @@ print("OK: Task2 20 s timeout and >=3 black-channel stop-line rule retained")
 print("OK: 0 mm target preserves the original Task4/5 controller profile")
 print("OK: -60 mm target selects the refined off-center profile")
 print("OK: 60~110 mm extreme profiles are continuous, symmetric and monotonic")
-print("OK: crossing brake is bounded to +/-1 cm and rejects invalid motion")
+print("OK: crossing brake is bounded to +/-6 mm and rejects invalid motion")
 print("PROFILE 0mm :", center_profile)
 print("PROFILE -60mm:", far_profile)
 print("PROFILE 110mm:", profile_for(110))
