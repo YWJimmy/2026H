@@ -356,13 +356,9 @@ Task2LapStopResult_t Task2LapStop_Update(uint32_t now_ms)
                 else
                 {
                     has_new_line_result = true;
-                    parking_line_black =
-                        ((s_line_result_snapshot.black_mask &
-                          TASK2_A_LINE_ADC345_MASK) ==
-                         TASK2_A_LINE_ADC345_MASK) ||
-                        ((s_line_result_snapshot.black_mask &
-                          TASK2_A_LINE_ADC456_MASK) ==
-                         TASK2_A_LINE_ADC456_MASK);
+                    /* 任意3路及以上同时检测到黑色，即认为当前帧检测到停止线。 */
+parking_line_black =
+    (s_line_result_snapshot.black_count >= 3U);
 
                     if (!LineFollowControl_Submit(
                             &s_line_result_snapshot) &&

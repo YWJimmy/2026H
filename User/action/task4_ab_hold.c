@@ -1,6 +1,5 @@
 #include "task4_ab_hold.h"
 
-#include "ball_position_action.h"
 #include "bsp_debug_uart.h"
 #include "chassis.h"
 #include "distance_tracker.h"
@@ -9,6 +8,8 @@
 #include "line_follow_control_config.h"
 #include "line_sensor.h"
 #include "task4_ab_hold_config.h"
+#include "task4_main_ball.h"
+#include "vision.h"
 
 typedef enum
 {
@@ -28,6 +29,10 @@ static uint32_t s_ab_elapsed_ms = 0U;
 static uint32_t s_last_report_ms = 0U;
 static uint32_t s_fault_detail = 0U;
 static bool s_ab_time_locked = false;
+static bool s_ab_time_pass = false;
+static bool s_ball_pass_at_b = false;
+static bool s_result_pass = false;
+static uint32_t s_ball_max_error_at_b_mm = 0U;
 static bool s_has_fresh_sensor_frame = false;
 static uint32_t s_last_sensor_sequence = 0U;
 static uint8_t s_last_sensor_valid_mask = 0U;
@@ -38,26 +43,31 @@ static LineFollowResult_t s_line_result;
 static LineFollowControlStatus_t s_line_control;
 static DistanceTrackerStatus_t s_distance;
 static ChassisStatus_t s_chassis;
-static BallPositionActionStatus_t s_ball;
+static VisionStatus_t s_vision;
+static Task4MainBallStatus_t s_ball;
 
 static Task4AbHoldResult_t Task4_Fault(uint32_t detail)
 {
     s_fault_detail = detail;
     s_state = TASK4_STATE_FAULT;
-    LineFollowControl_Stop(
-        LINE_FOLLOW_CONTROL_STOP_COMMAND_ERROR);
-    BallPositionAction_ForceSafeStop();
+    LineFollowControl_Stop(LINE_FOLLOW_CONTROL_STOP_COMMAND_ERROR);
+    Task4MainBall_Stop();
+    Vision_Stop();
     return TASK4_AB_HOLD_RESULT_FAULT;
 }
 
-static bool Task4_UpdateBall(uint32_t now_ms)
+static bool Task4_UpdateBall(void)
 {
-    if (BallPositionAction_Update(now_ms) ==
-        BALL_POSITION_ACTION_RESULT_FAULT)
+    Vision_Update();
+    if (!Vision_GetStatus(&s_vision))
     {
         return false;
     }
-    return BallPositionAction_GetStatus(&s_ball);
+    if (!Task4MainBall_Update(&s_vision))
+    {
+        return false;
+    }
+    return Task4MainBall_GetStatus(&s_ball);
 }
 
 static bool Task4_UpdateLine(void)
@@ -87,7 +97,6 @@ static bool Task4_UpdateLine(void)
     {
         return true;
     }
-
     if (!LineFollow_Update(&s_line_frame) ||
         !LineFollow_GetResult(&s_line_result))
     {
@@ -118,23 +127,30 @@ static void Task4_Report(uint32_t now_ms)
         (long)s_line_control.left_target_mm_s,
         (long)s_line_control.right_target_mm_s);
     (void)BSP_Debug_Printf(
-        "T4BALL,CX=%ld,XMM=%ld,TMM=%ld,ERRMM=%ld,VMM=%ld,A=%ld,DES=%ld,FF=%ld,ANG=%ld,SCORE=%u,FOUND=%u,OK=%lu,REJ=%lu,MODE=%s,PULSE=%u,V=%u\r\n",
+        "T4BALL,CX=%ld,ERR=%ld,PRED=%ld,VRAW=%ld,VF=%ld,"
+        "MODE=%s,PULSE=%u,STEP=%u,BIAS=%ld,POS=%ld,DAMP=%ld,FF=%ld,"
+        "CV=%ld,CA=%ld,MA=%ld,TURN=%ld,DYN=%u,MAXMM=%lu,IN1CM=%u,VIOL=%u,V=%u\r\n",
         (long)s_ball.center_x,
-        (long)s_ball.position_mm,
-        (long)s_ball.target_mm,
-        (long)s_ball.error_mm,
-        (long)s_ball.velocity_mm_s,
-        (long)s_ball.estimated_accel_mm_s2,
-        (long)s_ball.desired_ball_accel_mm_s2,
-        (long)s_ball.chassis_ff_accel_mm_s2,
-        (long)s_ball.platform_angle_mrad,
-        (unsigned int)s_ball.confidence_milli,
-        s_ball.vision_found ? 1U : 0U,
-        (unsigned long)s_ball.accepted_frames,
-        (unsigned long)s_ball.rejected_frames,
-        BallPositionAction_StateName(s_ball.state),
+        (long)s_ball.error_px,
+        (long)s_ball.predicted_error_px,
+        (long)s_ball.raw_velocity_px_s,
+        (long)s_ball.filtered_velocity_px_s,
+        Task4MainBall_ModeName(s_ball.mode),
         (unsigned int)s_ball.servo_pulse_us,
-        s_ball.vision_data_valid ? 1U : 0U);
+        (unsigned int)s_ball.servo_step_limit_us,
+        (long)s_ball.learned_bias_us,
+        (long)s_ball.position_control_us,
+        (long)s_ball.damping_control_us,
+        (long)s_ball.acceleration_feedforward_us,
+        (long)s_ball.chassis_forward_speed_mm_s,
+        (long)s_ball.chassis_planned_accel_mm_s2,
+        (long)s_ball.chassis_measured_accel_mm_s2,
+        (long)s_ball.chassis_turn_command_mm_s,
+        s_ball.dynamic_motion ? 1U : 0U,
+        (unsigned long)s_ball.max_abs_error_mm,
+        s_ball.within_one_cm ? 1U : 0U,
+        s_ball.one_cm_violation_latched ? 1U : 0U,
+        s_ball.vision_valid ? 1U : 0U);
 }
 
 bool Task4AbHold_Init(void)
@@ -166,8 +182,6 @@ bool Task4AbHold_Init(void)
 
 bool Task4AbHold_Start(uint32_t start_timestamp_ms)
 {
-    BallPositionActionCommand_t ball_command;
-
     if ((!s_initialized) ||
         ((s_state != TASK4_STATE_IDLE) &&
          (s_state != TASK4_STATE_FINISHED)))
@@ -175,7 +189,6 @@ bool Task4AbHold_Start(uint32_t start_timestamp_ms)
         s_fault_detail = 20U;
         return false;
     }
-
     if (!LineSensor_IsRunning())
     {
         s_fault_detail = 4U;
@@ -185,7 +198,6 @@ bool Task4AbHold_Start(uint32_t start_timestamp_ms)
     DistanceTracker_Reset();
     LineFollow_Init();
     LineSensor_DiscardFrame();
-
     if (!LineFollowControl_SetBaseSpeedRangeMmps(
             LINE_FOLLOW_CONTROL_CENTER_SPEED_MM_S,
             LINE_FOLLOW_CONTROL_MIN_BASE_SPEED_MM_S))
@@ -193,21 +205,27 @@ bool Task4AbHold_Start(uint32_t start_timestamp_ms)
         s_fault_detail = 5U;
         return false;
     }
-    if (!LineFollowControl_Start())
+    /*
+     * Arm vision and the servo before the chassis starts accelerating.
+     * This removes the first-frame delay that previously allowed a large
+     * launch disturbance before the ball controller became active.
+     */
+    if (!Vision_Init())
     {
-        s_fault_detail = 6U;
+        s_fault_detail = 7U;
         return false;
     }
-    BallPositionAction_DefaultCommand(
-        &ball_command,
-        TASK4_BALL_TARGET_X);
-    if (!BallPositionAction_Start(
-            &ball_command,
-            start_timestamp_ms))
+    if (!Task4MainBall_Init())
     {
-        LineFollowControl_Stop(
-            LINE_FOLLOW_CONTROL_STOP_COMMAND_ERROR);
+        Vision_Stop();
         s_fault_detail = 8U;
+        return false;
+    }
+    if (!LineFollowControl_Start())
+    {
+        Task4MainBall_Stop();
+        Vision_Stop();
+        s_fault_detail = 6U;
         return false;
     }
 
@@ -217,15 +235,20 @@ bool Task4AbHold_Start(uint32_t start_timestamp_ms)
     s_last_report_ms = start_timestamp_ms;
     s_fault_detail = 0U;
     s_ab_time_locked = false;
+    s_ab_time_pass = false;
+    s_ball_pass_at_b = false;
+    s_result_pass = false;
+    s_ball_max_error_at_b_mm = 0U;
     s_has_fresh_sensor_frame = false;
     s_last_sensor_sequence = 0U;
     s_last_sensor_valid_mask = 0U;
 
     (void)BSP_Debug_Printf(
-        "T4,START=1,B_TIME=%lu,STOP_AT=%lu,BALL_X=%ld\r\n",
+        "T4,START=1,CTRL=MAIN_PREDICTIVE_FF_V2,O_CX=653,TOL_PX=43,"
+        "B_TIME=%lu,STOP_AT=%lu,AB_LIMIT=%lu\r\n",
         (unsigned long)TASK4_B_TIME_DISTANCE_MM,
         (unsigned long)TASK4_STOP_START_DISTANCE_MM,
-        (long)TASK4_BALL_TARGET_X);
+        (unsigned long)TASK4_AB_TIME_LIMIT_MS);
     return true;
 }
 
@@ -244,6 +267,11 @@ Task4AbHoldResult_t Task4AbHold_Update(uint32_t now_ms)
         return Task4_Fault(9U);
     }
 
+    if ((s_state != TASK4_STATE_USER_STOPPING) &&
+        !Task4_UpdateBall())
+    {
+        return Task4_Fault(10U);
+    }
     if ((s_state != TASK4_STATE_STOPPING) &&
         (s_state != TASK4_STATE_USER_STOPPING) &&
         !Task4_UpdateLine())
@@ -258,12 +286,6 @@ Task4AbHoldResult_t Task4AbHold_Update(uint32_t now_ms)
     {
         return Task4_Fault(12U);
     }
-    if ((s_state != TASK4_STATE_USER_STOPPING) &&
-        !Task4_UpdateBall(now_ms))
-    {
-        return Task4_Fault(
-            100U + BallPositionAction_GetFaultDetail());
-    }
 
     Task4_Report(now_ms);
 
@@ -274,23 +296,29 @@ Task4AbHoldResult_t Task4AbHold_Update(uint32_t now_ms)
             Chassis_IsMotionStopped())
         {
             s_state = TASK4_STATE_FINISHED;
+            s_result_pass =
+                s_ab_time_locked &&
+                s_ab_time_pass &&
+                s_ball_pass_at_b;
             (void)BSP_Debug_Printf(
-                "T4,FINISH=1,MS=%lu,AB=%lu,DIST=%lu\r\n",
+                "T4,RESULT=%s,MS=%lu,AB=%lu,DIST=%lu,"
+                "BALL_OK=%u,MAX_ERR_MM=%lu\r\n",
+                s_result_pass ? "PASS" : "FAIL",
                 (unsigned long)(now_ms - s_start_ms),
                 (unsigned long)s_ab_elapsed_ms,
-                (unsigned long)s_distance.traveled_mm);
+                (unsigned long)s_distance.traveled_mm,
+                s_ball_pass_at_b ? 1U : 0U,
+                (unsigned long)s_ball_max_error_at_b_mm);
             return TASK4_AB_HOLD_RESULT_FINISHED;
         }
-        if ((uint32_t)(now_ms - s_start_ms) >=
-            TASK4_RUN_TIMEOUT_MS)
+        if ((uint32_t)(now_ms - s_start_ms) >= TASK4_RUN_TIMEOUT_MS)
         {
             return Task4_Fault(13U);
         }
         return TASK4_AB_HOLD_RESULT_RUNNING;
     }
 
-    if ((uint32_t)(now_ms - s_start_ms) >=
-        TASK4_RUN_TIMEOUT_MS)
+    if ((uint32_t)(now_ms - s_start_ms) >= TASK4_RUN_TIMEOUT_MS)
     {
         return Task4_Fault(14U);
     }
@@ -300,20 +328,26 @@ Task4AbHoldResult_t Task4AbHold_Update(uint32_t now_ms)
     }
 
     if (!s_ab_time_locked &&
-        (s_distance.traveled_mm >=
-         TASK4_B_TIME_DISTANCE_MM))
+        (s_distance.traveled_mm >= TASK4_B_TIME_DISTANCE_MM))
     {
         s_ab_elapsed_ms = now_ms - s_start_ms;
         s_ab_time_locked = true;
+        s_ab_time_pass = (s_ab_elapsed_ms <= TASK4_AB_TIME_LIMIT_MS);
+        s_ball_pass_at_b = !s_ball.one_cm_violation_latched;
+        s_ball_max_error_at_b_mm = s_ball.max_abs_error_mm;
+        s_result_pass = s_ab_time_pass && s_ball_pass_at_b;
         s_state = TASK4_STATE_B_TIMED;
         (void)BSP_Debug_Printf(
-            "T4,B_REACHED=1,AB=%lu,DIST=%lu\r\n",
+            "T4,B_REACHED=1,AB=%lu,TIME_OK=%u,BALL_OK=%u,"
+            "MAX_ERR_MM=%lu,DIST=%lu\r\n",
             (unsigned long)s_ab_elapsed_ms,
+            s_ab_time_pass ? 1U : 0U,
+            s_ball_pass_at_b ? 1U : 0U,
+            (unsigned long)s_ball_max_error_at_b_mm,
             (unsigned long)s_distance.traveled_mm);
     }
 
-    if (s_distance.traveled_mm >=
-        TASK4_STOP_START_DISTANCE_MM)
+    if (s_distance.traveled_mm >= TASK4_STOP_START_DISTANCE_MM)
     {
         if (!LineFollowControl_RequestStopWithDecel(
                 LINE_FOLLOW_CONTROL_STOP_TASK_COMPLETE,
@@ -342,7 +376,8 @@ bool Task4AbHold_RequestStop(void)
     if (s_state == TASK4_STATE_FINISHED)
     {
         LineFollowControl_Shutdown();
-        BallPositionAction_Stop();
+        Task4MainBall_Stop();
+        Vision_Stop();
         return true;
     }
     if (s_state == TASK4_STATE_USER_STOPPING)
@@ -355,14 +390,14 @@ bool Task4AbHold_RequestStop(void)
     {
         return false;
     }
-
     if (LineFollowControl_IsRunning() &&
-        !LineFollowControl_RequestStop(
-            LINE_FOLLOW_CONTROL_STOP_USER))
+        !LineFollowControl_RequestStop(LINE_FOLLOW_CONTROL_STOP_USER))
     {
         return false;
     }
-    BallPositionAction_Stop();
+
+    Task4MainBall_Stop();
+    Vision_Stop();
     s_state = TASK4_STATE_USER_STOPPING;
     return true;
 }
@@ -381,13 +416,15 @@ void Task4AbHold_ForceSafeStop(void)
     {
         LineFollowControl_Shutdown();
     }
-    BallPositionAction_ForceSafeStop();
+    if (Task4MainBall_IsInitialized())
+    {
+        Task4MainBall_Stop();
+    }
+    Vision_Stop();
     s_state = TASK4_STATE_IDLE;
 }
 
-bool Task4AbHold_GetElapsedMs(
-    uint32_t now_ms,
-    uint32_t *elapsed_ms)
+bool Task4AbHold_GetElapsedMs(uint32_t now_ms, uint32_t *elapsed_ms)
 {
     if ((!s_initialized) || (elapsed_ms == 0))
     {
@@ -405,13 +442,13 @@ const char *Task4AbHold_GetPhaseText(void)
         case TASK4_STATE_RUNNING:
             return "T4 TO B + HOLD";
         case TASK4_STATE_B_TIMED:
-            return "T4 TIME LOCKED";
+            return s_result_pass ? "T4 B PASS" : "T4 B FAIL";
         case TASK4_STATE_STOPPING:
-            return "T4 STOPPING";
+            return s_result_pass ? "T4 PASS STOP" : "T4 FAIL STOP";
         case TASK4_STATE_USER_STOPPING:
             return "T4 USER STOP";
         case TASK4_STATE_FINISHED:
-            return "T4 FINISHED";
+            return s_result_pass ? "T4 PASS" : "T4 FAIL";
         case TASK4_STATE_FAULT:
             return "T4 FAULT";
         case TASK4_STATE_IDLE:
