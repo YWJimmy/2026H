@@ -128,7 +128,9 @@ bool BallMotionEstimator_Update(
     }
 
     if ((frame == NULL) || !frame->found ||
-        (frame->score_milli < BALL_ESTIMATOR_MIN_SCORE_MILLI))
+        (((frame->score_milli != 0U) ||
+          (BALL_ESTIMATOR_ACCEPT_ZERO_SCORE == 0U)) &&
+         (frame->score_milli < BALL_ESTIMATOR_MIN_SCORE_MILLI)))
     {
         s_state.rejected_frames++;
         return true;

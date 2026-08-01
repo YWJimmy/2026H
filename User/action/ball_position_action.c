@@ -1,6 +1,7 @@
 #include "ball_position_action.h"
 
 #include "ball_motion_estimator.h"
+#include "ball_motion_estimator_config.h"
 #include "ball_position_action_config.h"
 #include "ball_dynamics_model.h"
 #include "vision.h"
@@ -221,8 +222,10 @@ static bool BallPosition_UpdateCapture(void)
     int32_t target_um;
 
     if (!s_motion.measurement_accepted ||
-        (s_motion.confidence_milli <
-         s_command.capture_min_score_milli) ||
+        (((s_motion.confidence_milli != 0U) ||
+          (BALL_ESTIMATOR_ACCEPT_ZERO_SCORE == 0U)) &&
+         (s_motion.confidence_milli <
+          s_command.capture_min_score_milli)) ||
         (BallPosition_AbsI32(s_motion.velocity_um_s) >
          BALL_POSITION_CAPTURE_MAX_SPEED_MM_S * 1000))
     {

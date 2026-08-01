@@ -172,7 +172,7 @@ static void Task6_Report(uint32_t now_ms)
         (long)s_line_control.left_target_mm_s,
         (long)s_line_control.right_target_mm_s);
     (void)BSP_Debug_Printf(
-        "T6BALL,CX=%ld,XMM=%ld,TMM=%ld,ERRMM=%ld,VMM=%ld,A=%ld,DES=%ld,FF=%ld,ANG=%ld,SCORE=%u,OK=%lu,REJ=%lu,MODE=%s,PULSE=%u,V=%u\r\n",
+        "T6BALL,CX=%ld,XMM=%ld,TMM=%ld,ERRMM=%ld,VMM=%ld,A=%ld,DES=%ld,FF=%ld,ANG=%ld,SCORE=%u,FOUND=%u,OK=%lu,REJ=%lu,MODE=%s,PULSE=%u,V=%u\r\n",
         (long)s_ball.center_x,
         (long)s_ball.position_mm,
         (long)s_ball.target_mm,
@@ -183,6 +183,7 @@ static void Task6_Report(uint32_t now_ms)
         (long)s_ball.chassis_ff_accel_mm_s2,
         (long)s_ball.platform_angle_mrad,
         (unsigned int)s_ball.confidence_milli,
+        s_ball.vision_found ? 1U : 0U,
         (unsigned long)s_ball.accepted_frames,
         (unsigned long)s_ball.rejected_frames,
         BallPositionAction_StateName(s_ball.state),
@@ -304,7 +305,8 @@ Task6LapTargetResult_t Task6LapTarget_Update(uint32_t now_ms)
     {
         if (!Task6_UpdateBall(now_ms))
         {
-            return Task6_Fault(10U);
+            return Task6_Fault(
+                100U + BallPositionAction_GetFaultDetail());
         }
 
         if (s_ball.target_locked)
@@ -354,7 +356,8 @@ Task6LapTargetResult_t Task6LapTarget_Update(uint32_t now_ms)
     if ((s_state != TASK6_STATE_USER_STOPPING) &&
         !Task6_UpdateBall(now_ms))
     {
-        return Task6_Fault(15U);
+        return Task6_Fault(
+            100U + BallPositionAction_GetFaultDetail());
     }
     Task6_Report(now_ms);
 
