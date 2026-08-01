@@ -16,10 +16,13 @@ typedef enum
 {
     TASK6_STATE_IDLE = 0,
     TASK6_STATE_CAPTURE_TARGET,
+    TASK6_STATE_START_HOLD,
+    TASK6_STATE_START_RAMP,
     TASK6_STATE_LAP_RUNNING,
     TASK6_STATE_FIND_A_LINE,
     TASK6_STATE_POST_LINE_RUN,
     TASK6_STATE_STOPPING,
+    TASK6_STATE_STOP_SETTLE,
     TASK6_STATE_USER_STOPPING,
     TASK6_STATE_FINISHED,
     TASK6_STATE_FAULT
@@ -30,7 +33,10 @@ static Task6State_t s_state = TASK6_STATE_IDLE;
 static uint32_t s_start_ms = 0U;
 static uint32_t s_lap_elapsed_ms = 0U;
 static uint32_t s_line_detect_ms = 0U;
+static uint32_t s_start_hold_ms = 0U;
+static uint32_t s_start_ramp_ms = 0U;
 static uint32_t s_stop_start_ms = 0U;
+static uint32_t s_stop_settle_ms = 0U;
 static uint32_t s_last_update_ms = 0U;
 static uint32_t s_last_report_ms = 0U;
 static uint32_t s_fault_detail = 0U;
@@ -42,6 +48,7 @@ static int32_t s_captured_target_mm = 0;
 static bool s_ball_pass_at_a = false;
 static uint32_t s_ball_max_error_at_a_mm = 0U;
 static bool s_result_pass = false;
+static uint8_t s_stop_speed_stage = 0U;
 static bool s_has_fresh_sensor_frame = false;
 static uint32_t s_last_sensor_sequence = 0U;
 static uint8_t s_last_sensor_valid_mask = 0U;
@@ -55,6 +62,64 @@ static DistanceTrackerStatus_t s_distance;
 static ChassisStatus_t s_chassis;
 static VisionStatus_t s_vision;
 static Task4MainBallStatus_t s_ball;
+
+static int32_t Task6_GetPostLineDistanceMm(void);
+
+static int32_t Task6_ProgressMilli(uint32_t elapsed_ms,
+                                   uint32_t duration_ms)
+{
+    if ((duration_ms == 0U) || (elapsed_ms >= duration_ms))
+    {
+        return 1000;
+    }
+    return (int32_t)(((uint64_t)elapsed_ms * 1000ULL) /
+                     (uint64_t)duration_ms);
+}
+
+static void Task6_ApplyBallTransient(uint32_t now_ms)
+{
+    Task4MainBallTransient_t mode =
+        TASK4_MAIN_BALL_TRANSIENT_NONE;
+    int32_t progress_milli = 0;
+
+    switch (s_state)
+    {
+        case TASK6_STATE_START_HOLD:
+            mode = TASK4_MAIN_BALL_TRANSIENT_START_HOLD;
+            progress_milli = Task6_ProgressMilli(
+                now_ms - s_start_hold_ms,
+                TASK6_START_HOLD_MS);
+            break;
+        case TASK6_STATE_START_RAMP:
+            mode = TASK4_MAIN_BALL_TRANSIENT_START_RAMP;
+            progress_milli = Task6_ProgressMilli(
+                now_ms - s_start_ramp_ms,
+                TASK6_START_RAMP_MS);
+            break;
+        case TASK6_STATE_POST_LINE_RUN:
+            mode = TASK4_MAIN_BALL_TRANSIENT_STOP_APPROACH;
+            progress_milli = Task6_ProgressMilli(
+                (uint32_t)Task6_GetPostLineDistanceMm(),
+                TASK6_POST_LINE_DISTANCE_MM);
+            break;
+        case TASK6_STATE_STOPPING:
+            mode = TASK4_MAIN_BALL_TRANSIENT_STOPPING;
+            progress_milli = Task6_ProgressMilli(
+                now_ms - s_stop_start_ms,
+                1500U);
+            break;
+        case TASK6_STATE_STOP_SETTLE:
+            mode = TASK4_MAIN_BALL_TRANSIENT_STOP_SETTLE;
+            progress_milli = Task6_ProgressMilli(
+                now_ms - s_stop_settle_ms,
+                TASK6_STOP_SETTLE_MS);
+            break;
+        default:
+            break;
+    }
+
+    Task4MainBall_SetTransient(mode, progress_milli);
+}
 
 static Task6LapTargetResult_t Task6_Fault(uint32_t detail)
 {
@@ -193,7 +258,7 @@ static void Task6_Report(uint32_t now_ms)
         s_ball.vision_valid ? 1U : 0U);
     (void)BSP_Debug_Printf(
         "T6GAIN,SCH=%ld,XSCH=%ld,PG=%ld,VG=%ld,PRED=%ld,DB=%ld,"
-        "FAST=%ld,REC=%ld,CB=%u\r\n",
+        "FAST=%ld,REC=%ld,CB=%u,TP=%s,TPR=%ld\r\n",
         (long)s_ball.target_schedule_milli,
         (long)s_ball.extreme_schedule_milli,
         (long)s_ball.position_gain_milli,
@@ -202,7 +267,9 @@ static void Task6_Report(uint32_t now_ms)
         (long)s_ball.position_deadband_px,
         (long)s_ball.fast_error_threshold_px,
         (long)s_ball.recover_error_threshold_px,
-        (unsigned int)s_ball.cross_brake_frames);
+        (unsigned int)s_ball.cross_brake_frames,
+        Task4MainBall_TransientName(s_ball.transient_mode),
+        (long)s_ball.transient_progress_milli);
 }
 
 bool Task6LapTarget_Init(void)
@@ -270,7 +337,10 @@ bool Task6LapTarget_Start(uint32_t start_timestamp_ms)
     s_start_ms = start_timestamp_ms;
     s_lap_elapsed_ms = 0U;
     s_line_detect_ms = 0U;
+    s_start_hold_ms = 0U;
+    s_start_ramp_ms = 0U;
     s_stop_start_ms = 0U;
+    s_stop_settle_ms = 0U;
     s_last_update_ms = start_timestamp_ms;
     s_last_report_ms = start_timestamp_ms;
     s_fault_detail = 0U;
@@ -280,6 +350,7 @@ bool Task6LapTarget_Start(uint32_t start_timestamp_ms)
     s_ball_pass_at_a = false;
     s_ball_max_error_at_a_mm = 0U;
     s_result_pass = false;
+    s_stop_speed_stage = 0U;
     s_captured_target_x = 0;
     s_captured_target_mm = 0;
     s_has_fresh_sensor_frame = false;
@@ -291,7 +362,9 @@ bool Task6LapTarget_Start(uint32_t start_timestamp_ms)
     TaskMenuUi_SetRunningElapsedMs(0U, true);
     (void)BSP_Debug_Printf(
         "T6,START=1,CTRL=T4_PREDICTIVE,CAPTURE=3_STABLE,"
-        "SEARCH_AFTER=%lu,POST=%lu,LIMIT=%lu\r\n",
+        "HOLD=%lu,RAMP=%lu,SEARCH_AFTER=%lu,POST=%lu,LIMIT=%lu\r\n",
+        (unsigned long)TASK6_START_HOLD_MS,
+        (unsigned long)TASK6_START_RAMP_MS,
         (unsigned long)TASK6_A_LINE_SEARCH_DISTANCE_MM,
         (unsigned long)TASK6_POST_LINE_DISTANCE_MM,
         (unsigned long)TASK6_LAP_TIMEOUT_MS);
@@ -314,6 +387,7 @@ Task6LapTargetResult_t Task6LapTarget_Update(uint32_t now_ms)
     {
         return Task6_Fault(9U);
     }
+    Task6_ApplyBallTransient(now_ms);
     if ((s_state != TASK6_STATE_USER_STOPPING) &&
         !Task6_UpdateBall())
     {
@@ -326,16 +400,18 @@ Task6LapTargetResult_t Task6LapTarget_Update(uint32_t now_ms)
         {
             s_captured_target_x = s_ball.target_x;
             s_captured_target_mm = s_ball.target_mm;
-            if (!LineFollowControl_Start())
-            {
-                return Task6_Fault(6U);
-            }
-            s_state = TASK6_STATE_LAP_RUNNING;
+            s_start_hold_ms = now_ms;
+            s_state = TASK6_STATE_START_HOLD;
+            Task4MainBall_SetTransient(
+                TASK4_MAIN_BALL_TRANSIENT_START_HOLD,
+                0);
             (void)BSP_Debug_Printf(
-                "T6,TARGET_LOCK=1,CX=%ld,XMM=%ld,MS=%lu\r\n",
+                "T6,TARGET_LOCK=1,CX=%ld,XMM=%ld,MS=%lu,"
+                "START_HOLD=%lu\r\n",
                 (long)s_captured_target_x,
                 (long)s_captured_target_mm,
-                (unsigned long)(now_ms - s_start_ms));
+                (unsigned long)(now_ms - s_start_ms),
+                (unsigned long)TASK6_START_HOLD_MS);
         }
         else if ((uint32_t)(now_ms - s_start_ms) >=
                  TASK6_TARGET_CAPTURE_TIMEOUT_MS)
@@ -346,7 +422,43 @@ Task6LapTargetResult_t Task6LapTarget_Update(uint32_t now_ms)
         return TASK6_LAP_TARGET_RESULT_RUNNING;
     }
 
+    if (s_state == TASK6_STATE_START_HOLD)
+    {
+        Task6_UpdateOled(now_ms);
+        if ((uint32_t)(now_ms - s_start_hold_ms) >=
+            TASK6_START_HOLD_MS)
+        {
+            if (!LineFollowControl_SetBaseSpeedRangeMmps(
+                    TASK6_START_CENTER_SPEED_MM_S,
+                    TASK6_START_MIN_SPEED_MM_S) ||
+                !LineFollowControl_Start() ||
+                !LineFollowControl_SetBaseSpeedRangeMmps(
+                    LINE_FOLLOW_CONTROL_CENTER_SPEED_MM_S,
+                    LINE_FOLLOW_CONTROL_MIN_BASE_SPEED_MM_S))
+            {
+                return Task6_Fault(6U);
+            }
+            s_start_ramp_ms = now_ms;
+            s_state = TASK6_STATE_START_RAMP;
+            Task4MainBall_SetTransient(
+                TASK4_MAIN_BALL_TRANSIENT_START_RAMP,
+                0);
+            (void)BSP_Debug_Printf(
+                "T6,START_RAMP=1,MS=%lu,SPD=%ld/%ld,"
+                "TARGET=%ld/%ld,RAMP=%lu\r\n",
+                (unsigned long)(now_ms - s_start_ms),
+                (long)TASK6_START_CENTER_SPEED_MM_S,
+                (long)TASK6_START_MIN_SPEED_MM_S,
+                (long)LINE_FOLLOW_CONTROL_CENTER_SPEED_MM_S,
+                (long)LINE_FOLLOW_CONTROL_MIN_BASE_SPEED_MM_S,
+                (unsigned long)TASK6_START_RAMP_MS);
+        }
+        Task6_Report(now_ms);
+        return TASK6_LAP_TARGET_RESULT_RUNNING;
+    }
+
     if ((s_state != TASK6_STATE_STOPPING) &&
+        (s_state != TASK6_STATE_STOP_SETTLE) &&
         (s_state != TASK6_STATE_USER_STOPPING) &&
         !Task6_UpdateLine(&has_new_line_result))
     {
@@ -362,30 +474,28 @@ Task6LapTargetResult_t Task6LapTarget_Update(uint32_t now_ms)
     Task6_UpdateOled(now_ms);
     Task6_Report(now_ms);
 
-    if ((s_state == TASK6_STATE_STOPPING) ||
-        (s_state == TASK6_STATE_USER_STOPPING))
+    if ((s_state == TASK6_STATE_START_RAMP) &&
+        ((uint32_t)(now_ms - s_start_ramp_ms) >=
+         TASK6_START_RAMP_MS))
+    {
+        s_state = TASK6_STATE_LAP_RUNNING;
+        Task4MainBall_SetTransient(
+            TASK4_MAIN_BALL_TRANSIENT_NONE,
+            0);
+        (void)BSP_Debug_Printf(
+            "T6,START_RAMP_DONE=1,MS=%lu,DIST=%lu\r\n",
+            (unsigned long)(now_ms - s_start_ms),
+            (unsigned long)s_distance.traveled_mm);
+    }
+
+    if (s_state == TASK6_STATE_USER_STOPPING)
     {
         if (!LineFollowControl_IsStopping() &&
             Chassis_IsMotionStopped())
         {
-            bool user_stopped = (s_state == TASK6_STATE_USER_STOPPING);
+            s_result_pass = false;
             s_state = TASK6_STATE_FINISHED;
-            if (user_stopped)
-            {
-                s_result_pass = false;
-            }
-            (void)BSP_Debug_Printf(
-                "T6,RESULT=%s,MS=%lu,LAP=%lu,DIST=%lu,BALL_OK=%u,"
-                "MAX_ERR_MM=%lu\r\n",
-                s_result_pass ? "PASS" : "FAIL",
-                (unsigned long)(now_ms - s_start_ms),
-                (unsigned long)(s_lap_time_locked ?
-                    s_lap_elapsed_ms : (now_ms - s_start_ms)),
-                (unsigned long)s_distance.traveled_mm,
-                s_ball_pass_at_a ? 1U : 0U,
-                (unsigned long)s_ball_max_error_at_a_mm);
-            TaskMenuUi_SetFinishedResult(
-                s_result_pass,
+            TaskMenuUi_SetFinishedResult(false,
                 s_lap_time_locked ? s_lap_elapsed_ms :
                     (now_ms - s_start_ms));
             return TASK6_LAP_TARGET_RESULT_FINISHED;
@@ -396,6 +506,58 @@ Task6LapTargetResult_t Task6LapTarget_Update(uint32_t now_ms)
             return Task6_Fault(13U);
         }
         return TASK6_LAP_TARGET_RESULT_RUNNING;
+    }
+
+    if (s_state == TASK6_STATE_STOPPING)
+    {
+        if (!LineFollowControl_IsStopping() &&
+            Chassis_IsMotionStopped())
+        {
+            s_stop_settle_ms = now_ms;
+            s_state = TASK6_STATE_STOP_SETTLE;
+            Task4MainBall_SetTransient(
+                TASK4_MAIN_BALL_TRANSIENT_STOP_SETTLE,
+                0);
+            (void)BSP_Debug_Printf(
+                "T6,STOP_SETTLE=1,MS=%lu,ERRMM=%ld,VF=%ld\r\n",
+                (unsigned long)(now_ms - s_start_ms),
+                (long)s_ball.error_mm,
+                (long)s_ball.filtered_velocity_px_s);
+            return TASK6_LAP_TARGET_RESULT_RUNNING;
+        }
+        if ((uint32_t)(now_ms - s_stop_start_ms) >=
+            TASK6_STOP_TIMEOUT_MS)
+        {
+            return Task6_Fault(13U);
+        }
+        return TASK6_LAP_TARGET_RESULT_RUNNING;
+    }
+
+    if (s_state == TASK6_STATE_STOP_SETTLE)
+    {
+        if ((uint32_t)(now_ms - s_stop_settle_ms) <
+            TASK6_STOP_SETTLE_MS)
+        {
+            return TASK6_LAP_TARGET_RESULT_RUNNING;
+        }
+
+        s_state = TASK6_STATE_FINISHED;
+        (void)BSP_Debug_Printf(
+            "T6,RESULT=%s,MS=%lu,LAP=%lu,DIST=%lu,BALL_OK=%u,"
+            "MAX_ERR_MM=%lu,FINAL_ERR_MM=%ld\r\n",
+            s_result_pass ? "PASS" : "FAIL",
+            (unsigned long)(now_ms - s_start_ms),
+            (unsigned long)(s_lap_time_locked ?
+                s_lap_elapsed_ms : (now_ms - s_start_ms)),
+            (unsigned long)s_distance.traveled_mm,
+            s_ball_pass_at_a ? 1U : 0U,
+            (unsigned long)s_ball_max_error_at_a_mm,
+            (long)s_ball.error_mm);
+        TaskMenuUi_SetFinishedResult(
+            s_result_pass,
+            s_lap_time_locked ? s_lap_elapsed_ms :
+                (now_ms - s_start_ms));
+        return TASK6_LAP_TARGET_RESULT_FINISHED;
     }
 
     if (!s_lap_time_locked &&
@@ -439,19 +601,50 @@ Task6LapTargetResult_t Task6LapTarget_Update(uint32_t now_ms)
             s_result_pass = s_time_pass && s_ball_pass_at_a;
             s_line_detect_ms = now_ms;
             s_line_center_mm = s_distance.center_signed_mm;
+            if (!LineFollowControl_SetBaseSpeedRangeMmps(
+                    TASK6_STOP_APPROACH_CENTER_SPEED_MM_S,
+                    TASK6_STOP_APPROACH_MIN_SPEED_MM_S))
+            {
+                return Task6_Fault(19U);
+            }
+            s_stop_speed_stage = 1U;
             s_state = TASK6_STATE_POST_LINE_RUN;
+            Task4MainBall_SetTransient(
+                TASK4_MAIN_BALL_TRANSIENT_STOP_APPROACH,
+                0);
             Task6_UpdateOled(now_ms);
             (void)BSP_Debug_Printf(
                 "T6,A_LINE=1,LAP=%lu,TIME_OK=%u,BALL_OK=%u,"
-                "MAX_ERR_MM=%lu,DIST=%lu,POST=%lu\r\n",
+                "MAX_ERR_MM=%lu,DIST=%lu,POST=%lu,SPD=%ld/%ld\r\n",
                 (unsigned long)s_lap_elapsed_ms,
                 s_time_pass ? 1U : 0U,
                 s_ball_pass_at_a ? 1U : 0U,
                 (unsigned long)s_ball_max_error_at_a_mm,
                 (unsigned long)s_distance.traveled_mm,
-                (unsigned long)TASK6_POST_LINE_DISTANCE_MM);
+                (unsigned long)TASK6_POST_LINE_DISTANCE_MM,
+                (long)TASK6_STOP_APPROACH_CENTER_SPEED_MM_S,
+                (long)TASK6_STOP_APPROACH_MIN_SPEED_MM_S);
         }
     }
+    if ((s_state == TASK6_STATE_POST_LINE_RUN) &&
+        (s_stop_speed_stage < 2U) &&
+        (Task6_GetPostLineDistanceMm() >=
+         (int32_t)TASK6_STOP_FINAL_STAGE_DISTANCE_MM))
+    {
+        if (!LineFollowControl_SetBaseSpeedRangeMmps(
+                TASK6_STOP_FINAL_CENTER_SPEED_MM_S,
+                TASK6_STOP_FINAL_MIN_SPEED_MM_S))
+        {
+            return Task6_Fault(21U);
+        }
+        s_stop_speed_stage = 2U;
+        (void)BSP_Debug_Printf(
+            "T6,STOP_FINAL_STAGE=1,POST=%ld,SPD=%ld/%ld\r\n",
+            (long)Task6_GetPostLineDistanceMm(),
+            (long)TASK6_STOP_FINAL_CENTER_SPEED_MM_S,
+            (long)TASK6_STOP_FINAL_MIN_SPEED_MM_S);
+    }
+
     if ((s_state == TASK6_STATE_POST_LINE_RUN) &&
         (Task6_GetPostLineDistanceMm() >=
          (int32_t)TASK6_POST_LINE_DISTANCE_MM))
@@ -465,6 +658,16 @@ Task6LapTargetResult_t Task6LapTarget_Update(uint32_t now_ms)
         }
         s_stop_start_ms = now_ms;
         s_state = TASK6_STATE_STOPPING;
+        Task4MainBall_SetTransient(
+            TASK4_MAIN_BALL_TRANSIENT_STOPPING,
+            0);
+        (void)BSP_Debug_Printf(
+            "T6,STOP_PROFILE=1,DECEL=%ld,JERK=%ld,"
+            "ENTRY_SPD=%ld/%ld\r\n",
+            (long)TASK6_STOP_DECEL_MM_S2,
+            (long)TASK6_STOP_JERK_MM_S3,
+            (long)s_line_control.left_target_mm_s,
+            (long)s_line_control.right_target_mm_s);
     }
     return TASK6_LAP_TARGET_RESULT_RUNNING;
 }
@@ -487,10 +690,13 @@ bool Task6LapTarget_RequestStop(void)
         return true;
     }
     if ((s_state != TASK6_STATE_CAPTURE_TARGET) &&
+        (s_state != TASK6_STATE_START_HOLD) &&
+        (s_state != TASK6_STATE_START_RAMP) &&
         (s_state != TASK6_STATE_LAP_RUNNING) &&
         (s_state != TASK6_STATE_FIND_A_LINE) &&
         (s_state != TASK6_STATE_POST_LINE_RUN) &&
-        (s_state != TASK6_STATE_STOPPING))
+        (s_state != TASK6_STATE_STOPPING) &&
+        (s_state != TASK6_STATE_STOP_SETTLE))
     {
         return false;
     }
@@ -542,10 +748,13 @@ const char *Task6LapTarget_GetPhaseText(void)
     switch (s_state)
     {
         case TASK6_STATE_CAPTURE_TARGET: return "T6 CAPTURE TARGET";
+        case TASK6_STATE_START_HOLD: return "T6 START HOLD";
+        case TASK6_STATE_START_RAMP: return "T6 START RAMP";
         case TASK6_STATE_LAP_RUNNING: return "T6 LAP TARGET";
         case TASK6_STATE_FIND_A_LINE: return "T6 FIND A LINE";
         case TASK6_STATE_POST_LINE_RUN: return "T6 A TIME LOCK";
         case TASK6_STATE_STOPPING: return s_result_pass ? "T6 PASS STOP" : "T6 FAIL STOP";
+        case TASK6_STATE_STOP_SETTLE: return "T6 STOP SETTLE";
         case TASK6_STATE_USER_STOPPING: return "T6 USER STOP";
         case TASK6_STATE_FINISHED: return s_result_pass ? "T6 PASS" : "T6 FAIL";
         case TASK6_STATE_FAULT: return "T6 FAULT";

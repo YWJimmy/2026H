@@ -23,6 +23,16 @@ typedef enum
     TASK4_MAIN_BALL_MODE_SERVO_ERROR
 } Task4MainBallMode_t;
 
+typedef enum
+{
+    TASK4_MAIN_BALL_TRANSIENT_NONE = 0,
+    TASK4_MAIN_BALL_TRANSIENT_START_HOLD,
+    TASK4_MAIN_BALL_TRANSIENT_START_RAMP,
+    TASK4_MAIN_BALL_TRANSIENT_STOP_APPROACH,
+    TASK4_MAIN_BALL_TRANSIENT_STOPPING,
+    TASK4_MAIN_BALL_TRANSIENT_STOP_SETTLE
+} Task4MainBallTransient_t;
+
 typedef struct
 {
     int32_t target_x;
@@ -58,6 +68,10 @@ typedef struct
     int32_t recover_error_threshold_px;
     uint8_t cross_brake_frames;
 
+    /* Task 6 startup/parking transient diagnostics. */
+    Task4MainBallTransient_t transient_mode;
+    int32_t transient_progress_milli;
+
     int32_t chassis_forward_speed_mm_s;
     int32_t chassis_planned_accel_mm_s2;
     int32_t chassis_measured_accel_mm_s2;
@@ -90,11 +104,15 @@ bool Task4MainBall_InitTarget(int32_t target_x, int32_t target_mm);
 /* Capture the current stable ball position before Task 6 starts driving. */
 bool Task4MainBall_InitCaptureCurrent(void);
 bool Task4MainBall_IsTargetLocked(void);
+/* Task 6 only: select a temporary startup/parking control profile. */
+void Task4MainBall_SetTransient(Task4MainBallTransient_t transient_mode,
+                                int32_t progress_milli);
 bool Task4MainBall_Update(const VisionStatus_t *vision_status);
 void Task4MainBall_Stop(void);
 bool Task4MainBall_IsInitialized(void);
 bool Task4MainBall_GetStatus(Task4MainBallStatus_t *status);
 const char *Task4MainBall_ModeName(Task4MainBallMode_t mode);
+const char *Task4MainBall_TransientName(Task4MainBallTransient_t mode);
 
 #ifdef __cplusplus
 }
