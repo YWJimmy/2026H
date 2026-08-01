@@ -56,7 +56,7 @@
 /* Task 4 ball controller: implementation intentionally lives in main.c. */
 #define T4_BALL_TARGET_CX                         ((int32_t)653)
 #define T4_BALL_ONE_CM_PX                         ((int32_t)43)
-#define T4_BALL_SERVO_CENTER_US                   ((int32_t)1700)
+#define T4_BALL_SERVO_CENTER_US                   ((int32_t)1675)
 
 /* Stronger usable range, still inside the proven Task 3 1300..2000 region. */
 #define T4_BALL_SERVO_MIN_US                      ((int32_t)1320)

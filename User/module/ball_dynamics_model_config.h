@@ -7,8 +7,8 @@
 #define BALL_DYNAMICS_KAPPA_Q10                 ((int32_t)731) /* 5/7 */
 #define BALL_DYNAMICS_Q_SHIFT                   10
 
-/* e2d738b task-4 calibration: 1650 us level, 1300..2000 us control. */
-#define BALL_DYNAMICS_LEVEL_PULSE_US            ((int32_t)1650)
+/* Measured level pulse; keep the validated 1300..2000 us control range. */
+#define BALL_DYNAMICS_LEVEL_PULSE_US            ((int32_t)1675)
 #define BALL_DYNAMICS_POS_PULSE_PER_MRAD_Q10    ((int32_t)652) /* 0.6366 us/mrad */
 #define BALL_DYNAMICS_NEG_PULSE_PER_MRAD_Q10    ((int32_t)652)
 /* e2d738b calibration: increasing pulse moves the ball toward image +X. */
