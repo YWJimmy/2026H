@@ -270,6 +270,12 @@ static void Task6_Report(uint32_t now_ms)
         (unsigned int)s_ball.cross_brake_frames,
         Task4MainBall_TransientName(s_ball.transient_mode),
         (long)s_ball.transient_progress_milli);
+    (void)BSP_Debug_Printf(
+        "T6MOTION,VFWD=%ld,TURN=%ld,AFF=%ld,CFF=%ld\r\n",
+        (long)s_ball.chassis_forward_speed_mm_s,
+        (long)s_ball.chassis_turn_command_mm_s,
+        (long)s_ball.acceleration_feedforward_us,
+        (long)s_ball.centrifugal_feedforward_us);
 }
 
 bool Task6LapTarget_Init(void)

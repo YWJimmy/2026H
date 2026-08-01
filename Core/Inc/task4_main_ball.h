@@ -55,6 +55,7 @@ typedef struct
     int32_t position_control_us;
     int32_t damping_control_us;
     int32_t acceleration_feedforward_us;
+    int32_t centrifugal_feedforward_us;
     int32_t control_delta_us;
 
     /* Target-position gain scheduling diagnostics (1000 = 1.000). */

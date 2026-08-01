@@ -101,6 +101,20 @@
 #define T4_BALL_MEASURED_ACCEL_LIMIT_MM_S2         ((int32_t)3000)
 
 /*
+ * Negative-target centrifugal compensation. The empirical sign matches the
+ * current chassis convention: positive turn command (left wheel faster)
+ * pushes a far-negative target ball toward +X, so the servo feedforward is
+ * negative. Magnitude follows measured speed * signed turn command.
+ */
+#define T4_BALL_NEG_CENTRIFUGAL_SIGN                ((int32_t)-1)
+#define T4_BALL_NEG_CENTRIFUGAL_TARGET_FULL_MM      ((int32_t)100)
+#define T4_BALL_NEG_CENTRIFUGAL_MIN_SPEED_MM_S      ((int32_t)120)
+#define T4_BALL_NEG_CENTRIFUGAL_MIN_TURN_MM_S       ((int32_t)40)
+#define T4_BALL_NEG_CENTRIFUGAL_DIVISOR             ((int32_t)1000)
+#define T4_BALL_NEG_CENTRIFUGAL_LIMIT_US            ((int32_t)45)
+#define T4_BALL_NEG_CENTRIFUGAL_STEP_US             ((int32_t)6)
+
+/*
  * Launch-only feedforward. The real car consistently throws the ball toward
  * +X during launch, so launch compensation must command the same direction
  * as the negative position correction used for a positive ball error.
@@ -240,6 +254,7 @@ static int32_t s_t4_ball_previous_forward_speed_mm_s = 0;
 static int32_t s_t4_ball_filtered_velocity_px_s = 0;
 static int32_t s_t4_ball_filtered_measured_accel_mm_s2 = 0;
 static int32_t s_t4_ball_filtered_feedforward_us = 0;
+static int32_t s_t4_ball_filtered_centrifugal_us = 0;
 static uint8_t s_t4_ball_bias_divider = 0U;
 static int8_t s_t4_ball_last_error_sign = 0;
 static uint8_t s_t4_ball_cross_brake_frames = 0U;
@@ -515,6 +530,8 @@ static bool T4Ball_UpdateVehicleMotion(void)
     int32_t abs_forward_speed_mm_s;
     int32_t launch_floor_us;
     int32_t transient_ff_scale_milli;
+    int32_t centrifugal_target_us = 0;
+    int32_t negative_target_scale_milli = 0;
     uint32_t dt_ms;
 
     uint32_t previous_timestamp_ms =
@@ -691,6 +708,37 @@ static bool T4Ball_UpdateVehicleMotion(void)
         feedforward_target_us,
         feedforward_step_us);
 
+    if ((s_t4_ball_status.target_mm < 0) &&
+        (abs_forward_speed_mm_s >=
+         T4_BALL_NEG_CENTRIFUGAL_MIN_SPEED_MM_S) &&
+        (T4Ball_AbsI32(s_t4_ball_chassis_status.turn_command_mm_s) >=
+         T4_BALL_NEG_CENTRIFUGAL_MIN_TURN_MM_S))
+    {
+        negative_target_scale_milli = T4Ball_ClampI32(
+            T4Ball_MulDivI32(
+                -s_t4_ball_status.target_mm,
+                T4_BALL_SCHEDULE_ONE_MILLI,
+                T4_BALL_NEG_CENTRIFUGAL_TARGET_FULL_MM),
+            0,
+            T4_BALL_SCHEDULE_ONE_MILLI);
+        centrifugal_target_us = T4Ball_MulDivI32(
+            measured_forward_speed_mm_s,
+            s_t4_ball_chassis_status.turn_command_mm_s,
+            T4_BALL_NEG_CENTRIFUGAL_DIVISOR);
+        centrifugal_target_us = T4Ball_MulDivI32(
+            T4_BALL_NEG_CENTRIFUGAL_SIGN * centrifugal_target_us,
+            negative_target_scale_milli,
+            T4_BALL_SCHEDULE_ONE_MILLI);
+        centrifugal_target_us = T4Ball_ClampI32(
+            centrifugal_target_us,
+            -T4_BALL_NEG_CENTRIFUGAL_LIMIT_US,
+            T4_BALL_NEG_CENTRIFUGAL_LIMIT_US);
+    }
+    s_t4_ball_filtered_centrifugal_us = T4Ball_ApproachI32(
+        s_t4_ball_filtered_centrifugal_us,
+        centrifugal_target_us,
+        T4_BALL_NEG_CENTRIFUGAL_STEP_US);
+
     s_t4_ball_status.chassis_forward_speed_mm_s =
         measured_forward_speed_mm_s;
     s_t4_ball_status.chassis_planned_accel_mm_s2 =
@@ -701,6 +749,8 @@ static bool T4Ball_UpdateVehicleMotion(void)
         s_t4_ball_chassis_status.turn_command_mm_s;
     s_t4_ball_status.acceleration_feedforward_us =
         s_t4_ball_filtered_feedforward_us;
+    s_t4_ball_status.centrifugal_feedforward_us =
+        s_t4_ball_filtered_centrifugal_us;
     s_t4_ball_status.launch_boost_active =
         s_t4_ball_launch_active;
 
@@ -749,6 +799,7 @@ static bool T4Ball_InitCommon(
     s_t4_ball_filtered_velocity_px_s = 0;
     s_t4_ball_filtered_measured_accel_mm_s2 = 0;
     s_t4_ball_filtered_feedforward_us = 0;
+    s_t4_ball_filtered_centrifugal_us = 0;
     s_t4_ball_bias_divider = 0U;
     s_t4_ball_last_error_sign = 0;
     s_t4_ball_cross_brake_frames = 0U;
@@ -844,6 +895,7 @@ void Task4MainBall_SetTransient(Task4MainBallTransient_t transient_mode,
         if (transient_mode == TASK4_MAIN_BALL_TRANSIENT_START_HOLD)
         {
             s_t4_ball_filtered_feedforward_us = 0;
+            s_t4_ball_filtered_centrifugal_us = 0;
             s_t4_ball_filtered_measured_accel_mm_s2 = 0;
             s_t4_ball_filtered_velocity_px_s = 0;
             s_t4_ball_last_error_sign = 0;
@@ -980,7 +1032,8 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
         s_t4_ball_status.damping_control_us = 0;
         s_t4_ball_status.control_delta_us =
             s_t4_ball_status.learned_bias_us +
-            s_t4_ball_status.acceleration_feedforward_us;
+            s_t4_ball_status.acceleration_feedforward_us +
+            s_t4_ball_status.centrifugal_feedforward_us;
         return T4Ball_WritePulse(
             T4_BALL_SERVO_CENTER_US +
                 s_t4_ball_status.control_delta_us,
@@ -1083,6 +1136,7 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
             desired_delta_us =
                 s_t4_ball_status.learned_bias_us +
                 s_t4_ball_status.acceleration_feedforward_us +
+                s_t4_ball_status.centrifugal_feedforward_us +
                 s_t4_ball_status.position_control_us +
                 s_t4_ball_status.damping_control_us;
             desired_delta_us = T4Ball_ClampI32(
@@ -1531,6 +1585,7 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
     desired_delta_us =
         s_t4_ball_status.learned_bias_us +
         s_t4_ball_status.acceleration_feedforward_us +
+        s_t4_ball_status.centrifugal_feedforward_us +
         position_control_us +
         damping_control_us;
     desired_delta_us = T4Ball_ClampI32(
@@ -1557,11 +1612,13 @@ void Task4MainBall_Stop(void)
      */
     (void)Project_ServoHoldHorizontal();
     s_t4_ball_initialized = false;
+    s_t4_ball_filtered_centrifugal_us = 0;
     s_t4_ball_transient_mode = TASK4_MAIN_BALL_TRANSIENT_NONE;
     s_t4_ball_transient_progress_milli = 0;
     s_t4_ball_status.initialized = false;
     s_t4_ball_status.transient_mode = TASK4_MAIN_BALL_TRANSIENT_NONE;
     s_t4_ball_status.transient_progress_milli = 0;
+    s_t4_ball_status.centrifugal_feedforward_us = 0;
     s_t4_ball_status.servo_pulse_us = PROJECT_SERVO_HORIZONTAL_US;
     s_t4_ball_status.mode = TASK4_MAIN_BALL_MODE_IDLE;
 }

@@ -54,6 +54,12 @@ def require_regex(text: str, pattern: str, label: str) -> None:
         raise AssertionError(f"missing state transition: {label}")
 
 
+def c_round_mul_div(value: int, numerator: int, denominator: int) -> int:
+    product = value * numerator
+    product += denominator // 2 if product >= 0 else -(denominator // 2)
+    return abs(product) // denominator * (1 if product >= 0 else -1)
+
+
 def main() -> int:
     # Task 2 currently uses the measured 80 mm sensor-to-axle offset.
     require("User/action/task2_lap_stop_config.h", "((uint32_t)80U)")
@@ -116,6 +122,7 @@ def main() -> int:
         "T6,STOP_PROFILE=1",
         "T6,STOP_SETTLE=1",
         "TASK4_MAIN_BALL_TRANSIENT_STOPPING",
+        "T6MOTION,VFWD=%ld,TURN=%ld,AFF=%ld,CFF=%ld",
     ):
         require(task6, token)
 
@@ -163,10 +170,51 @@ def main() -> int:
         "T4_BALL_CROSS_MIN_VELOCITY_PX_S",
         "T4_BALL_CROSS_MAX_FRAME_DELTA_PX",
         "(abs_error_mm > T4_BALL_ONE_CM_MM) ||",
+        "T4_BALL_NEG_CENTRIFUGAL_SIGN",
+        "T4_BALL_NEG_CENTRIFUGAL_TARGET_FULL_MM",
+        "T4_BALL_NEG_CENTRIFUGAL_MIN_SPEED_MM_S",
+        "T4_BALL_NEG_CENTRIFUGAL_MIN_TURN_MM_S",
+        "centrifugal_feedforward_us",
     ):
         require(main_c, token)
-    if "T4_BALL_CROSS_BRAKE_MAX_ERROR_PX" in read(main_c):
+    main_text = read(main_c)
+    if "T4_BALL_CROSS_BRAKE_MAX_ERROR_PX" in main_text:
         raise AssertionError("crossing brake regressed to a pixel boundary")
+
+    centrifugal_sign = macro_int(
+        main_text, "T4_BALL_NEG_CENTRIFUGAL_SIGN")
+    centrifugal_full_mm = macro_int(
+        main_text, "T4_BALL_NEG_CENTRIFUGAL_TARGET_FULL_MM")
+    centrifugal_min_speed = macro_int(
+        main_text, "T4_BALL_NEG_CENTRIFUGAL_MIN_SPEED_MM_S")
+    centrifugal_min_turn = macro_int(
+        main_text, "T4_BALL_NEG_CENTRIFUGAL_MIN_TURN_MM_S")
+    centrifugal_divisor = macro_int(
+        main_text, "T4_BALL_NEG_CENTRIFUGAL_DIVISOR")
+    centrifugal_limit = macro_int(
+        main_text, "T4_BALL_NEG_CENTRIFUGAL_LIMIT_US")
+
+    def centrifugal_target(target_mm: int, speed: int, turn: int) -> int:
+        if (target_mm >= 0 or abs(speed) < centrifugal_min_speed
+                or abs(turn) < centrifugal_min_turn):
+            return 0
+        target_scale = max(0, min(1000, c_round_mul_div(
+            -target_mm, 1000, centrifugal_full_mm)))
+        value = c_round_mul_div(speed, turn, centrifugal_divisor)
+        value = c_round_mul_div(
+            centrifugal_sign * value, target_scale, 1000)
+        return max(-centrifugal_limit, min(centrifugal_limit, value))
+
+    if centrifugal_target(-92, 360, 70) != -23:
+        raise AssertionError("negative-target clockwise compensation mismatch")
+    if centrifugal_target(-92, 360, -70) != 23:
+        raise AssertionError("centrifugal compensation does not reverse with turn")
+    if centrifugal_target(92, 360, 70) != 0:
+        raise AssertionError("centrifugal compensation leaked into positive target")
+    if centrifugal_target(-92, 360, 0) != 0:
+        raise AssertionError("centrifugal compensation leaked into straight driving")
+    if centrifugal_target(-120, 500, 110) != -centrifugal_limit:
+        raise AssertionError("centrifugal compensation limit is not enforced")
 
     for path in (
         "Core/Src/main.c",
@@ -190,6 +238,7 @@ def main() -> int:
     print(f"startup_reachable_mm_s={startup_reachable}")
     print("cross_brake_physical_limit_mm=6")
     print("startup_and_parking_state_order=PASS")
+    print("negative_target_centrifugal_feedforward=PASS")
     print(f"main_sha256={sha256(main_c)}")
     print(f"task6_sha256={sha256(task6)}")
     return 0
