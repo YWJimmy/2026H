@@ -5,6 +5,7 @@
 #include "bsp_oled.h"
 #include "task_menu_ui.h"
 #include "test_ball_balance.h"
+#include "test_task4_ab_hold.h"
 
 #include "stm32f4xx_hal.h"
 
@@ -49,6 +50,23 @@ static bool Test_OledKey_StartTask(TaskMenuTask_t task)
         return true;
     }
 
+    if (task == TASK_MENU_TASK_4_AB_HOLD)
+    {
+        if (!Test_Task4ABHold_Init())
+        {
+            (void)BSP_Debug_Printf(
+                "ERR,TASK4_INIT\r\n");
+            return false;
+        }
+
+        s_active_task = task;
+        s_task_active = true;
+        s_task_finish_reported = false;
+        (void)BSP_Debug_Printf(
+            "UI,EVENT=TASK_STARTED,TASK=4\r\n");
+        return true;
+    }
+
     (void)BSP_Debug_Printf(
         "UI,EVENT=TASK_NOT_IMPLEMENTED,TASK=%u\r\n",
         (unsigned int)task);
@@ -65,6 +83,10 @@ static void Test_OledKey_StopActiveTask(void)
     if (s_active_task == TASK_MENU_TASK_3_BALL_SEQUENCE)
     {
         Test_BallBalance_Stop();
+    }
+    else if (s_active_task == TASK_MENU_TASK_4_AB_HOLD)
+    {
+        Test_Task4ABHold_Stop();
     }
 
     (void)BSP_Debug_Printf(
@@ -101,6 +123,25 @@ static void Test_OledKey_UpdateActiveTask(void)
                 "UI,EVENT=TASK_FINISHED,TASK=3,RESULT=%s,"
                 "HOLDING_NEG5_UNTIL_K0\r\n",
                 Test_BallBalance_Passed() ? "PASS" : "FAIL");
+        }
+    }
+    else if (s_active_task == TASK_MENU_TASK_4_AB_HOLD)
+    {
+        Test_Task4ABHold_Update();
+        TaskMenuUi_SetRunningElapsedMs(
+            Test_Task4ABHold_GetElapsedMs(),
+            Test_Task4ABHold_IsTimerRunning());
+
+        if (Test_Task4ABHold_IsFinished() &&
+            (!s_task_finish_reported))
+        {
+            s_task_finish_reported = true;
+            TaskMenuUi_SetFinishedResult(
+                Test_Task4ABHold_IsPassed(),
+                Test_Task4ABHold_GetElapsedMs());
+            (void)BSP_Debug_Printf(
+                "UI,EVENT=TASK_FINISHED,TASK=4,RESULT=%s\r\n",
+                Test_Task4ABHold_IsPassed() ? "PASS" : "FAIL");
         }
     }
 }

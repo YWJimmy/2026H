@@ -87,6 +87,21 @@ uint32_t BSP_VisionUart_GetFrameCount(void);
  */
 uint32_t BSP_VisionUart_GetErrorCount(void);
 
+/* ---- Stubs for module-layer compatibility ---- */
+
+typedef struct {
+    uint32_t received_byte_count;
+    uint32_t overflow_count;
+    uint32_t uart_error_count;
+    uint32_t restart_count;
+    uint32_t last_uart_error;
+    uint16_t queued_byte_count;
+} BspVisionUartStatus_t;
+
+void BSP_VisionUart_Stop(void);
+bool BSP_VisionUart_PopByte(uint8_t *byte);
+bool BSP_VisionUart_GetStatus(BspVisionUartStatus_t *status);
+
 #ifdef __cplusplus
 }
 #endif

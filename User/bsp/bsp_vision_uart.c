@@ -297,3 +297,28 @@ uint32_t BSP_VisionUart_GetErrorCount(void)
 {
     return s_error_count;
 }
+
+/* ---- Stubs for vision.c compatibility ---- */
+void BSP_VisionUart_Stop(void)
+{
+    s_initialized = false;
+    (void)HAL_UART_AbortReceive(&huart6);
+}
+
+bool BSP_VisionUart_PopByte(uint8_t *byte)
+{
+    (void)byte;
+    return false;
+}
+
+bool BSP_VisionUart_GetStatus(BspVisionUartStatus_t *status)
+{
+    if (status == NULL) return false;
+    status->received_byte_count = s_frame_count;
+    status->overflow_count = 0U;
+    status->uart_error_count = s_error_count;
+    status->restart_count = 0U;
+    status->last_uart_error = 0U;
+    status->queued_byte_count = 0U;
+    return true;
+}

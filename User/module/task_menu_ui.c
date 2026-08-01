@@ -294,6 +294,17 @@ static void TaskMenu_RenderRunning(void)
         return;
     }
 
+    if (s_selected_task == TASK_MENU_TASK_4_AB_HOLD)
+    {
+        BSP_Oled_Clear();
+        BSP_Oled_DrawString(0U, 0U, "TASK4 A-B HOLD");
+        BSP_Oled_DrawString(94U, 0U,
+            s_running_timer_started ? "RUN" : "RDY");
+        TaskMenu_DrawLargeTime(s_running_elapsed_ms);
+        BSP_Oled_DrawString(30U, 7U, "K0 STOP");
+        return;
+    }
+
     BSP_Oled_Clear();
     BSP_Oled_DrawString(0U, 0U, "TASK RUN REQUEST");
     BSP_Oled_DrawString(0U, 2U, TaskMenuUi_TaskName(s_selected_task));
@@ -309,6 +320,19 @@ static void TaskMenu_RenderFinished(void)
         TaskMenu_RenderTask3Timer(
             s_finished_elapsed_ms,
             s_finished_passed ? "PASS" : "FAIL",
+            s_finished_passed ? "HOLD K0" : "K0 MENU");
+        return;
+    }
+
+    if ((s_selected_task == TASK_MENU_TASK_4_AB_HOLD) &&
+        s_finished_has_result)
+    {
+        BSP_Oled_Clear();
+        BSP_Oled_DrawString(0U, 0U, "TASK4 A-B HOLD");
+        BSP_Oled_DrawString(94U, 0U,
+            s_finished_passed ? "PASS" : "FAIL");
+        TaskMenu_DrawLargeTime(s_finished_elapsed_ms);
+        BSP_Oled_DrawString(30U, 7U,
             s_finished_passed ? "HOLD K0" : "K0 MENU");
         return;
     }

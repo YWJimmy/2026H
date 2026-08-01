@@ -17,10 +17,11 @@
 #define TEST_MODE_OLED_KEY                  13U
 
 #define TEST_MODE_BALL_BALANCE              20U
+#define TEST_MODE_TASK4_AB_HOLD             21U
 
 /*
- * 钢球往返测试
+ * Task 4: AB Hold - drive 1.5m in 8s with ball centered
  */
-#define PROJECT_TEST_MODE                   TEST_MODE_BALL_BALANCE
+#define PROJECT_TEST_MODE                   TEST_MODE_OLED_KEY
 
 #endif /* TEST_CONFIG_H */

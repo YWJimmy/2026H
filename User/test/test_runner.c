@@ -42,6 +42,9 @@
 #elif PROJECT_TEST_MODE == TEST_MODE_BALL_BALANCE
 #include "test_ball_balance.h"
 
+#elif PROJECT_TEST_MODE == TEST_MODE_TASK4_AB_HOLD
+#include "test_task4_ab_hold.h"
+
 #else
 #error "Unsupported PROJECT_TEST_MODE"
 #endif
@@ -87,6 +90,9 @@ bool TestRunner_Init(void)
 
 #elif PROJECT_TEST_MODE == TEST_MODE_BALL_BALANCE
     return Test_BallBalance_Init();
+
+#elif PROJECT_TEST_MODE == TEST_MODE_TASK4_AB_HOLD
+    return Test_Task4ABHold_Init();
 
 #else
     return false;
@@ -134,6 +140,9 @@ void TestRunner_Update(void)
 
 #elif PROJECT_TEST_MODE == TEST_MODE_BALL_BALANCE
     Test_BallBalance_Update();
+
+#elif PROJECT_TEST_MODE == TEST_MODE_TASK4_AB_HOLD
+    Test_Task4ABHold_Update();
 #endif
 }
 
@@ -178,5 +187,8 @@ void TestRunner_Stop(void)
 
 #elif PROJECT_TEST_MODE == TEST_MODE_BALL_BALANCE
     Test_BallBalance_Stop();
+
+#elif PROJECT_TEST_MODE == TEST_MODE_TASK4_AB_HOLD
+    Test_Task4ABHold_Stop();
 #endif
 }
