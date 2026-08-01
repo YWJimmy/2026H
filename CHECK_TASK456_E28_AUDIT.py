@@ -35,6 +35,13 @@ need('User/action/app_task_port.c', 'Task6LapTarget_Start', 'Task6 port')
 need('MDK-ARM/2026H.uvprojx', '..\\User\\action\\task5_lap_hold.c', 'Task5 Keil source')
 need('MDK-ARM/2026H.uvprojx', '..\\User\\action\\task6_lap_target.c', 'Task6 Keil source')
 
+# Task 2 performance optimization.
+need('User/action/task2_lap_stop_config.h', 'TASK2_CRUISE_CENTER_SPEED_MM_S         ((int32_t)390)', 'Task2 cruise 390')
+need('User/action/task2_lap_stop_config.h', 'TASK2_CRUISE_MIN_SPEED_MM_S            ((int32_t)320)', 'Task2 minimum 320')
+need('User/action/task2_lap_stop_config.h', 'TASK2_PREDECEL_DISTANCE_MM             ((uint32_t)5600U)', 'Task2 5.6m search gate')
+need('User/action/task2_lap_stop_config.h', 'TASK2_PREDECEL_CENTER_SPEED_MM_S       ((int32_t)260)', 'Task2 search speed 260')
+need('User/action/task2_lap_stop.c', 'TASK2_CRUISE_CENTER_SPEED_MM_S,', 'Task2 task-specific speed applied')
+
 # Task 4 completeness (uploaded project feature audit).
 for token, label in [
     ('Task4MainBall_Init()', 'Task4 ball init'),
@@ -90,6 +97,10 @@ need('Core/Src/main.c', 'T4_BALL_CAPTURE_REQUIRED_FRAMES           ((uint8_t)3U)
 need('Core/Src/main.c', 'T4_BALL_CAPTURE_MIN_MM                    ((int32_t)-125)', 'Task6 -12.5cm')
 need('Core/Src/main.c', 'T4_BALL_CAPTURE_MAX_MM                    ((int32_t)125)', 'Task6 +12.5cm')
 need('User/action/task6_lap_target.c', '(now_ms - s_start_ms) > TASK6_LAP_TIMEOUT_MS', 'Task6 inclusive 30s')
+need('Core/Src/main.c', 'T4_BALL_TARGET_SCHEDULE_FULL_MM             ((int32_t)60)', 'Task6 -6cm full scheduling')
+need('Core/Src/main.c', 'T4_BALL_OFFCENTER_VELOCITY_SCALE_MILLI      ((int32_t)1500)', 'Task6 off-center damping')
+need('Core/Src/main.c', 'T4_BALL_OFFCENTER_POSITION_SCALE_MILLI      ((int32_t)720)', 'Task6 off-center position scale')
+need('User/action/task6_lap_target.c', 'T6GAIN,SCH=%ld,PG=%ld,VG=%ld,PRED=%ld,DB=%ld', 'Task6 gain diagnostics')
 
 # Reset / safe stop must end at 1650 with PWM enabled.
 need('Core/Inc/project_servo_level.h', 'PROJECT_SERVO_HORIZONTAL_US ((uint16_t)1650U)', '1650 level')
@@ -114,9 +125,10 @@ if errors:
     sys.exit(1)
 
 print('TASK456 AUDIT PASS')
+print('OK: Task2 5.6 m gate and task-specific higher speed')
 print('OK: Task4 complete feature chain')
 print('OK: Task5 fixed-O full-lap hold')
-print('OK: Task6 captured-target full-lap hold')
+print('OK: Task6 captured-target full-lap hold with target-position scheduling')
 print('OK: 30.000 s inclusive boundary')
 print('OK: A-line search gate 5.4 m')
 print('OK: reset/fault/menu reset holds servo at 1650 us')

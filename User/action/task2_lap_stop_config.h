@@ -5,20 +5,25 @@
 
 #include "app_config.h"
 
-#define TASK2_PREDECEL_DISTANCE_MM             ((uint32_t)4800U)
-#define TASK2_PREDECEL_CENTER_SPEED_MM_S       ((int32_t)220)
-#define TASK2_PREDECEL_MIN_SPEED_MM_S          ((int32_t)220)
+/* Task 2专用巡线速度，不改变任务4/5/6的全局巡线参数。 */
+#define TASK2_CRUISE_CENTER_SPEED_MM_S         ((int32_t)390)
+#define TASK2_CRUISE_MIN_SPEED_MM_S            ((int32_t)320)
 
-/* ADC3/4/5 或 ADC4/5/6 为黑；其他通道状态不影响判定。 */
+/* 5.6 m后才进入停止线搜索，缩短低速运行区间。 */
+#define TASK2_PREDECEL_DISTANCE_MM             ((uint32_t)5600U)
+#define TASK2_PREDECEL_CENTER_SPEED_MM_S       ((int32_t)260)
+#define TASK2_PREDECEL_MIN_SPEED_MM_S          ((int32_t)260)
+
+/* 兼容保留的停止线掩码；当前帧判定采用任意3路及以上为黑。 */
 #define TASK2_A_LINE_ADC345_MASK               ((uint8_t)0x1CU)
 #define TASK2_A_LINE_ADC456_MASK               ((uint8_t)0x38U)
 #define TASK2_A_LINE_WINDOW_FRAMES             ((uint8_t)5U)
 #define TASK2_A_LINE_REQUIRED_FRAMES           ((uint8_t)3U)
 
 #define TASK2_SENSOR_FORWARD_OFFSET_MM         \
-    ((uint32_t)150U)
+    ((uint32_t)80U)
 
-/* 编码器位置外环：接近 85 mm 目标时逐步降低巡线基础速度。 */
+/* 编码器位置外环：识别停止线后按传感器前置距离逐步减速。 */
 #define TASK2_POSITION_MAX_SPEED_MM_S           ((int32_t)120)
 #define TASK2_POSITION_MIN_SPEED_MM_S           ((int32_t)40)
 #define TASK2_POSITION_KP_Q10                   ((int32_t)1536)

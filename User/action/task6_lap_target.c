@@ -191,6 +191,13 @@ static void Task6_Report(uint32_t now_ms)
         s_ball.within_one_cm ? 1U : 0U,
         s_ball.one_cm_violation_latched ? 1U : 0U,
         s_ball.vision_valid ? 1U : 0U);
+    (void)BSP_Debug_Printf(
+        "T6GAIN,SCH=%ld,PG=%ld,VG=%ld,PRED=%ld,DB=%ld\r\n",
+        (long)s_ball.target_schedule_milli,
+        (long)s_ball.position_gain_milli,
+        (long)s_ball.velocity_gain_milli,
+        (long)s_ball.prediction_horizon_ms,
+        (long)s_ball.position_deadband_px);
 }
 
 bool Task6LapTarget_Init(void)

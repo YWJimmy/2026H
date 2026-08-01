@@ -255,8 +255,8 @@ bool Task2LapStop_Start(uint32_t start_timestamp_ms)
     LineSensor_DiscardFrame();
 
     if (!LineFollowControl_SetBaseSpeedRangeMmps(
-            LINE_FOLLOW_CONTROL_CENTER_SPEED_MM_S,
-            LINE_FOLLOW_CONTROL_MIN_BASE_SPEED_MM_S))
+            TASK2_CRUISE_CENTER_SPEED_MM_S,
+            TASK2_CRUISE_MIN_SPEED_MM_S))
     {
         s_fault_detail = 5U;
         (void)BSP_Debug_Printf(
@@ -290,8 +290,9 @@ bool Task2LapStop_Start(uint32_t start_timestamp_ms)
     s_fault_detail = 0U;
 
     (void)BSP_Debug_Printf(
-        "T2,START=1,SEARCH_AFTER=%lu,SLOW_AT=%lu,SLOW=%ld,OFFSET=%lu\r\n",
-        (unsigned long)TASK2_PREDECEL_DISTANCE_MM,
+        "T2,START=1,CRUISE=%ld/%ld,SEARCH_AFTER=%lu,SLOW=%ld,OFFSET=%lu\r\n",
+        (long)TASK2_CRUISE_CENTER_SPEED_MM_S,
+        (long)TASK2_CRUISE_MIN_SPEED_MM_S,
         (unsigned long)TASK2_PREDECEL_DISTANCE_MM,
         (long)TASK2_PREDECEL_CENTER_SPEED_MM_S,
         (unsigned long)TASK2_SENSOR_FORWARD_OFFSET_MM);
@@ -356,9 +357,9 @@ Task2LapStopResult_t Task2LapStop_Update(uint32_t now_ms)
                 else
                 {
                     has_new_line_result = true;
-                    /* ÈÎÒâ3Â·¼°ÒÔÉÏÍ¬Ê±¼ì²âµ½ºÚÉ«£¬¼´ÈÏÎªµ±Ç°Ö¡¼ì²âµ½Í£Ö¹Ïß¡£ */
-parking_line_black =
-    (s_line_result_snapshot.black_count >= 3U);
+                    /* ä»»æ„3è·¯åŠä»¥ä¸ŠåŒæ—¶æ£€æµ‹åˆ°é»‘è‰²ï¼Œå³è®¤ä¸ºå½“å‰å¸§æ£€æµ‹åˆ°åœæ­¢çº¿ã€‚ */
+                    parking_line_black =
+                        (s_line_result_snapshot.black_count >= 3U);
 
                     if (!LineFollowControl_Submit(
                             &s_line_result_snapshot) &&
