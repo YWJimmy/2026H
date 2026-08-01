@@ -49,10 +49,14 @@ typedef struct
 
     /* Target-position gain scheduling diagnostics (1000 = 1.000). */
     int32_t target_schedule_milli;
+    int32_t extreme_schedule_milli;
     int32_t position_gain_milli;
     int32_t velocity_gain_milli;
     int32_t prediction_horizon_ms;
     int32_t position_deadband_px;
+    int32_t fast_error_threshold_px;
+    int32_t recover_error_threshold_px;
+    uint8_t cross_brake_frames;
 
     int32_t chassis_forward_speed_mm_s;
     int32_t chassis_planned_accel_mm_s2;

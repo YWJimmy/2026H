@@ -143,14 +143,45 @@
 #define T4_BALL_TARGET_SCHEDULE_START_MM            ((int32_t)20)
 #define T4_BALL_TARGET_SCHEDULE_FULL_MM             ((int32_t)60)
 #define T4_BALL_SCHEDULE_ONE_MILLI                   ((int32_t)1000)
-#define T4_BALL_OFFCENTER_POSITION_SCALE_MILLI      ((int32_t)720)
-#define T4_BALL_OFFCENTER_VELOCITY_SCALE_MILLI      ((int32_t)1500)
-#define T4_BALL_OFFCENTER_RAW_VEL_SCALE_MILLI       ((int32_t)600)
-#define T4_BALL_OFFCENTER_PREDICT_SCALE_MILLI       ((int32_t)800)
-#define T4_BALL_OFFCENTER_SLEW_SCALE_MILLI          ((int32_t)700)
-#define T4_BALL_OFFCENTER_RECOVER_SLEW_MILLI        ((int32_t)850)
-#define T4_BALL_OFFCENTER_DEADBAND_EXTRA_PX         ((int32_t)2)
-#define T4_BALL_OFFCENTER_BIAS_DIVIDER_EXTRA        ((int32_t)3)
+#define T4_BALL_OFFCENTER_POSITION_SCALE_MILLI      ((int32_t)650)
+#define T4_BALL_OFFCENTER_VELOCITY_SCALE_MILLI      ((int32_t)1650)
+#define T4_BALL_OFFCENTER_RAW_VEL_SCALE_MILLI       ((int32_t)500)
+#define T4_BALL_OFFCENTER_PREDICT_SCALE_MILLI       ((int32_t)700)
+#define T4_BALL_OFFCENTER_SLEW_SCALE_MILLI          ((int32_t)600)
+#define T4_BALL_OFFCENTER_RECOVER_SLEW_MILLI        ((int32_t)750)
+#define T4_BALL_OFFCENTER_DEADBAND_EXTRA_PX         ((int32_t)3)
+#define T4_BALL_OFFCENTER_BIAS_DIVIDER_EXTRA        ((int32_t)4)
+
+/*
+ * The mechanism becomes still more sensitive near either end of the rod.
+ * Continue scheduling from 60 to 110 mm instead of freezing the -60 mm
+ * profile for every farther target.
+ */
+#define T4_BALL_EXTREME_SCHEDULE_START_MM           ((int32_t)60)
+#define T4_BALL_EXTREME_SCHEDULE_FULL_MM            ((int32_t)110)
+#define T4_BALL_EXTREME_POSITION_SCALE_MILLI        ((int32_t)500)
+#define T4_BALL_EXTREME_VELOCITY_SCALE_MILLI        ((int32_t)1900)
+#define T4_BALL_EXTREME_RAW_VEL_SCALE_MILLI         ((int32_t)350)
+#define T4_BALL_EXTREME_PREDICT_SCALE_MILLI         ((int32_t)550)
+#define T4_BALL_EXTREME_SLEW_SCALE_MILLI            ((int32_t)420)
+#define T4_BALL_EXTREME_RECOVER_SLEW_MILLI          ((int32_t)600)
+#define T4_BALL_EXTREME_DEADBAND_EXTRA_PX           ((int32_t)5)
+#define T4_BALL_EXTREME_BIAS_DIVIDER_EXTRA          ((int32_t)8)
+#define T4_BALL_EXTREME_FAST_ERROR_EXTRA_PX         ((int32_t)10)
+#define T4_BALL_EXTREME_RECOVER_ERROR_EXTRA_PX      ((int32_t)24)
+#define T4_BALL_EXTREME_FAST_VELOCITY_EXTRA_PX_S    ((int32_t)90)
+#define T4_BALL_EXTREME_RECOVER_VELOCITY_EXTRA_PX_S ((int32_t)170)
+
+/*
+ * After the ball crosses a far-end target, brake it for several vision frames
+ * before applying the opposite position push. This removes the repeated
+ * up/down servo reversal that otherwise sustains a limit-cycle oscillation.
+ */
+#define T4_BALL_CROSS_BRAKE_FRAMES                  ((uint8_t)3U)
+#define T4_BALL_CROSS_BRAKE_MAX_ERROR_PX            ((int32_t)58)
+#define T4_BALL_CROSS_POSITION_SCALE_MILLI          ((int32_t)0)
+#define T4_BALL_CROSS_DAMPING_SCALE_MILLI           ((int32_t)1250)
+#define T4_BALL_CROSS_SLEW_US                       ((int32_t)8)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -171,6 +202,8 @@ static int32_t s_t4_ball_filtered_velocity_px_s = 0;
 static int32_t s_t4_ball_filtered_measured_accel_mm_s2 = 0;
 static int32_t s_t4_ball_filtered_feedforward_us = 0;
 static uint8_t s_t4_ball_bias_divider = 0U;
+static int8_t s_t4_ball_last_error_sign = 0;
+static uint8_t s_t4_ball_cross_brake_frames = 0U;
 static bool s_t4_ball_launch_active = false;
 static uint32_t s_t4_ball_launch_start_ms = 0U;
 static uint8_t s_t4_ball_capture_count = 0U;
@@ -299,6 +332,27 @@ static int32_t T4Ball_TargetScheduleMilli(void)
         span_mm);
 }
 
+static int32_t T4Ball_ExtremeScheduleMilli(void)
+{
+    int32_t offset_mm = T4Ball_AbsI32(s_t4_ball_status.target_mm);
+    int32_t span_mm = T4_BALL_EXTREME_SCHEDULE_FULL_MM -
+                      T4_BALL_EXTREME_SCHEDULE_START_MM;
+
+    if (offset_mm <= T4_BALL_EXTREME_SCHEDULE_START_MM)
+    {
+        return 0;
+    }
+    if ((offset_mm >= T4_BALL_EXTREME_SCHEDULE_FULL_MM) ||
+        (span_mm <= 0))
+    {
+        return T4_BALL_SCHEDULE_ONE_MILLI;
+    }
+    return T4Ball_MulDivI32(
+        offset_mm - T4_BALL_EXTREME_SCHEDULE_START_MM,
+        T4_BALL_SCHEDULE_ONE_MILLI,
+        span_mm);
+}
+
 static int32_t T4Ball_ScheduledValue(int32_t center_value,
                                      int32_t offcenter_value,
                                      int32_t schedule_milli)
@@ -313,12 +367,20 @@ static int32_t T4Ball_ScheduledSlew(int32_t base_slew_us,
                                     int32_t schedule_milli,
                                     bool recovery)
 {
+    int32_t extreme_schedule_milli = T4Ball_ExtremeScheduleMilli();
     int32_t scale_milli = T4Ball_ScheduledValue(
         T4_BALL_SCHEDULE_ONE_MILLI,
         recovery ? T4_BALL_OFFCENTER_RECOVER_SLEW_MILLI :
                    T4_BALL_OFFCENTER_SLEW_SCALE_MILLI,
         schedule_milli);
-    int32_t scheduled = T4Ball_MulDivI32(
+    int32_t scheduled;
+
+    scale_milli = T4Ball_ScheduledValue(
+        scale_milli,
+        recovery ? T4_BALL_EXTREME_RECOVER_SLEW_MILLI :
+                   T4_BALL_EXTREME_SLEW_SCALE_MILLI,
+        extreme_schedule_milli);
+    scheduled = T4Ball_MulDivI32(
         base_slew_us,
         scale_milli,
         T4_BALL_SCHEDULE_ONE_MILLI);
@@ -546,6 +608,8 @@ static bool T4Ball_InitCommon(
     s_t4_ball_filtered_measured_accel_mm_s2 = 0;
     s_t4_ball_filtered_feedforward_us = 0;
     s_t4_ball_bias_divider = 0U;
+    s_t4_ball_last_error_sign = 0;
+    s_t4_ball_cross_brake_frames = 0U;
     s_t4_ball_launch_active = !capture_current;
     s_t4_ball_launch_start_ms = 0U;
     s_t4_ball_capture_count = 0U;
@@ -637,10 +701,23 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
     int32_t prediction_scale_milli;
     int32_t position_deadband_px;
     int32_t target_schedule_milli;
+    int32_t extreme_schedule_milli;
+    int32_t deadband_extra_px;
+    int32_t fast_error_threshold_px;
+    int32_t recover_error_threshold_px;
+    int32_t fast_velocity_threshold_px_s;
+    int32_t recover_velocity_threshold_px_s;
+    int32_t current_error_sign;
+    int32_t cross_position_scale_milli;
+    int32_t cross_damping_scale_milli;
+    int32_t cross_slew_us;
+    int32_t toward_scale_milli;
+    int32_t away_scale_milli;
     int32_t bias_adapt_divider;
     int32_t bias_step_us;
     uint32_t vision_dt_ms = 0U;
     bool vehicle_motion_updated;
+    bool cross_brake_active = false;
 
     if (!s_t4_ball_initialized || (vision_status == 0))
     {
@@ -649,13 +726,44 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
 
     vehicle_motion_updated = T4Ball_UpdateVehicleMotion();
     target_schedule_milli = T4Ball_TargetScheduleMilli();
+    extreme_schedule_milli = T4Ball_ExtremeScheduleMilli();
+    deadband_extra_px = T4Ball_ScheduledValue(
+        0,
+        T4_BALL_OFFCENTER_DEADBAND_EXTRA_PX,
+        target_schedule_milli);
+    deadband_extra_px = T4Ball_ScheduledValue(
+        deadband_extra_px,
+        T4_BALL_EXTREME_DEADBAND_EXTRA_PX,
+        extreme_schedule_milli);
     position_deadband_px = T4_BALL_POSITION_DEADBAND_PX +
+        deadband_extra_px;
+    fast_error_threshold_px = T4_BALL_FAST_ERROR_PX +
         T4Ball_MulDivI32(
-            T4_BALL_OFFCENTER_DEADBAND_EXTRA_PX,
-            target_schedule_milli,
+            T4_BALL_EXTREME_FAST_ERROR_EXTRA_PX,
+            extreme_schedule_milli,
+            T4_BALL_SCHEDULE_ONE_MILLI);
+    recover_error_threshold_px = T4_BALL_RECOVER_ERROR_PX +
+        T4Ball_MulDivI32(
+            T4_BALL_EXTREME_RECOVER_ERROR_EXTRA_PX,
+            extreme_schedule_milli,
+            T4_BALL_SCHEDULE_ONE_MILLI);
+    fast_velocity_threshold_px_s = T4_BALL_FAST_VELOCITY_PX_S +
+        T4Ball_MulDivI32(
+            T4_BALL_EXTREME_FAST_VELOCITY_EXTRA_PX_S,
+            extreme_schedule_milli,
+            T4_BALL_SCHEDULE_ONE_MILLI);
+    recover_velocity_threshold_px_s =
+        T4_BALL_RECOVER_VELOCITY_PX_S +
+        T4Ball_MulDivI32(
+            T4_BALL_EXTREME_RECOVER_VELOCITY_EXTRA_PX_S,
+            extreme_schedule_milli,
             T4_BALL_SCHEDULE_ONE_MILLI);
     s_t4_ball_status.target_schedule_milli = target_schedule_milli;
+    s_t4_ball_status.extreme_schedule_milli = extreme_schedule_milli;
     s_t4_ball_status.position_deadband_px = position_deadband_px;
+    s_t4_ball_status.fast_error_threshold_px = fast_error_threshold_px;
+    s_t4_ball_status.recover_error_threshold_px =
+        recover_error_threshold_px;
 
     s_t4_ball_status.vision_sequence = vision_status->sequence;
     s_t4_ball_status.vision_valid =
@@ -670,6 +778,9 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
         s_t4_ball_previous_center_x = 0;
         s_t4_ball_last_vision_timestamp_ms = 0U;
         s_t4_ball_filtered_velocity_px_s = 0;
+        s_t4_ball_last_error_sign = 0;
+        s_t4_ball_cross_brake_frames = 0U;
+        s_t4_ball_status.cross_brake_frames = 0U;
         s_t4_ball_status.raw_speed_px = 0;
         s_t4_ball_status.filtered_speed_px = 0;
         s_t4_ball_status.raw_velocity_px_s = 0;
@@ -752,6 +863,9 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
             s_t4_ball_last_vision_timestamp_ms =
                 vision_status->timestamp_ms;
             s_t4_ball_filtered_velocity_px_s = 0;
+            s_t4_ball_last_error_sign = 0;
+            s_t4_ball_cross_brake_frames = 0U;
+            s_t4_ball_status.cross_brake_frames = 0U;
             s_t4_ball_launch_active = true;
             s_t4_ball_launch_start_ms = 0U;
             s_t4_ball_status.mode = TASK4_MAIN_BALL_MODE_HOLD;
@@ -834,6 +948,10 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
         T4_BALL_SCHEDULE_ONE_MILLI,
         T4_BALL_OFFCENTER_PREDICT_SCALE_MILLI,
         target_schedule_milli);
+    prediction_scale_milli = T4Ball_ScheduledValue(
+        prediction_scale_milli,
+        T4_BALL_EXTREME_PREDICT_SCALE_MILLI,
+        extreme_schedule_milli);
     prediction_horizon_ms = T4Ball_MulDivI32(
         s_t4_ball_status.dynamic_motion ?
             T4_BALL_PREDICT_DYNAMIC_MS :
@@ -853,6 +971,45 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
     abs_error_mm = T4Ball_AbsI32(error_mm);
     abs_predicted_error_px = T4Ball_AbsI32(predicted_error_px);
     abs_velocity_px_s = T4Ball_AbsI32(filtered_velocity_px_s);
+
+    current_error_sign = 0;
+    if (error_px > position_deadband_px)
+    {
+        current_error_sign = 1;
+    }
+    else if (error_px < -position_deadband_px)
+    {
+        current_error_sign = -1;
+    }
+    if ((extreme_schedule_milli > 0) &&
+        (current_error_sign != 0))
+    {
+        if ((s_t4_ball_last_error_sign != 0) &&
+            (current_error_sign != s_t4_ball_last_error_sign) &&
+            (abs_error_px <= T4_BALL_CROSS_BRAKE_MAX_ERROR_PX))
+        {
+            s_t4_ball_cross_brake_frames =
+                T4_BALL_CROSS_BRAKE_FRAMES;
+        }
+        s_t4_ball_last_error_sign = (int8_t)current_error_sign;
+    }
+    else if (extreme_schedule_milli == 0)
+    {
+        s_t4_ball_last_error_sign = (int8_t)current_error_sign;
+        s_t4_ball_cross_brake_frames = 0U;
+    }
+    if ((s_t4_ball_cross_brake_frames > 0U) &&
+        (abs_error_px <= T4_BALL_CROSS_BRAKE_MAX_ERROR_PX) &&
+        (extreme_schedule_milli > 0))
+    {
+        cross_brake_active = true;
+    }
+    else if (abs_error_px > T4_BALL_CROSS_BRAKE_MAX_ERROR_PX)
+    {
+        s_t4_ball_cross_brake_frames = 0U;
+    }
+    s_t4_ball_status.cross_brake_frames =
+        s_t4_ball_cross_brake_frames;
 
     s_t4_ball_status.center_x = center_x;
     s_t4_ball_status.position_mm = position_mm;
@@ -901,6 +1058,11 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
                 T4_BALL_OFFCENTER_BIAS_DIVIDER_EXTRA,
                 target_schedule_milli,
                 T4_BALL_SCHEDULE_ONE_MILLI);
+        bias_adapt_divider += T4Ball_MulDivI32(
+            T4_BALL_EXTREME_BIAS_DIVIDER_EXTRA -
+                T4_BALL_OFFCENTER_BIAS_DIVIDER_EXTRA,
+            extreme_schedule_milli,
+            T4_BALL_SCHEDULE_ONE_MILLI);
         s_t4_ball_bias_divider++;
         if ((int32_t)s_t4_ball_bias_divider >= bias_adapt_divider)
         {
@@ -937,6 +1099,10 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
         T4_BALL_SCHEDULE_ONE_MILLI,
         T4_BALL_OFFCENTER_POSITION_SCALE_MILLI,
         target_schedule_milli);
+    position_scale_milli = T4Ball_ScheduledValue(
+        position_scale_milli,
+        T4_BALL_EXTREME_POSITION_SCALE_MILLI,
+        extreme_schedule_milli);
     position_gain_milli = T4Ball_MulDivI32(
         position_gain * T4_BALL_SCHEDULE_ONE_MILLI,
         position_scale_milli,
@@ -953,13 +1119,25 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
         if (((error_px > 0) && (filtered_velocity_px_s < 0)) ||
             ((error_px < 0) && (filtered_velocity_px_s > 0)))
         {
-            position_control_us =
-                T4Ball_MulDivI32(position_control_us, 3, 4);
+            toward_scale_milli = T4Ball_ScheduledValue(
+                750,
+                500,
+                extreme_schedule_milli);
+            position_control_us = T4Ball_MulDivI32(
+                position_control_us,
+                toward_scale_milli,
+                T4_BALL_SCHEDULE_ONE_MILLI);
         }
         else
         {
-            position_control_us =
-                T4Ball_MulDivI32(position_control_us, 5, 4);
+            away_scale_milli = T4Ball_ScheduledValue(
+                1250,
+                1050,
+                extreme_schedule_milli);
+            position_control_us = T4Ball_MulDivI32(
+                position_control_us,
+                away_scale_milli,
+                T4_BALL_SCHEDULE_ONE_MILLI);
         }
     }
 
@@ -970,6 +1148,10 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
         T4_BALL_SCHEDULE_ONE_MILLI,
         T4_BALL_OFFCENTER_VELOCITY_SCALE_MILLI,
         target_schedule_milli);
+    velocity_scale_milli = T4Ball_ScheduledValue(
+        velocity_scale_milli,
+        T4_BALL_EXTREME_VELOCITY_SCALE_MILLI,
+        extreme_schedule_milli);
     velocity_gain_milli = T4Ball_MulDivI32(
         velocity_gain_num * 100,
         velocity_scale_milli,
@@ -978,6 +1160,10 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
         T4_BALL_SCHEDULE_ONE_MILLI,
         T4_BALL_OFFCENTER_RAW_VEL_SCALE_MILLI,
         target_schedule_milli);
+    raw_velocity_scale_milli = T4Ball_ScheduledValue(
+        raw_velocity_scale_milli,
+        T4_BALL_EXTREME_RAW_VEL_SCALE_MILLI,
+        extreme_schedule_milli);
     raw_velocity_gain_milli = T4Ball_MulDivI32(
         T4_BALL_RAW_VELOCITY_GAIN_NUM * 100,
         raw_velocity_scale_milli,
@@ -991,6 +1177,26 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
         raw_velocity_gain_milli,
         T4_BALL_SCHEDULE_ONE_MILLI);
     s_t4_ball_status.velocity_gain_milli = velocity_gain_milli;
+
+    if (cross_brake_active)
+    {
+        cross_position_scale_milli = T4Ball_ScheduledValue(
+            T4_BALL_SCHEDULE_ONE_MILLI,
+            T4_BALL_CROSS_POSITION_SCALE_MILLI,
+            extreme_schedule_milli);
+        cross_damping_scale_milli = T4Ball_ScheduledValue(
+            T4_BALL_SCHEDULE_ONE_MILLI,
+            T4_BALL_CROSS_DAMPING_SCALE_MILLI,
+            extreme_schedule_milli);
+        position_control_us = T4Ball_MulDivI32(
+            position_control_us,
+            cross_position_scale_milli,
+            T4_BALL_SCHEDULE_ONE_MILLI);
+        damping_control_us = T4Ball_MulDivI32(
+            damping_control_us,
+            cross_damping_scale_milli,
+            T4_BALL_SCHEDULE_ONE_MILLI);
+    }
 
     if ((abs_error_px <= position_deadband_px) &&
         (abs_velocity_px_s <= 25) &&
@@ -1007,10 +1213,22 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
             target_schedule_milli,
             false);
     }
-    else if ((abs_error_px >= T4_BALL_RECOVER_ERROR_PX) ||
-             (abs_velocity_px_s >= T4_BALL_RECOVER_VELOCITY_PX_S) ||
+    else if (cross_brake_active)
+    {
+        s_t4_ball_status.mode = TASK4_MAIN_BALL_MODE_DAMP;
+        cross_slew_us = T4Ball_ScheduledSlew(
+            T4_BALL_SLEW_NORMAL_US,
+            target_schedule_milli,
+            false);
+        maximum_step_us = T4Ball_ScheduledValue(
+            cross_slew_us,
+            T4_BALL_CROSS_SLEW_US,
+            extreme_schedule_milli);
+    }
+    else if ((abs_error_px >= recover_error_threshold_px) ||
+             (abs_velocity_px_s >= recover_velocity_threshold_px_s) ||
              (T4Ball_AbsI32(raw_velocity_px_s) >=
-              T4_BALL_RECOVER_VELOCITY_PX_S))
+              recover_velocity_threshold_px_s))
     {
         s_t4_ball_status.mode = TASK4_MAIN_BALL_MODE_RECOVER;
         maximum_step_us = T4Ball_ScheduledSlew(
@@ -1018,8 +1236,8 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
             target_schedule_milli,
             true);
     }
-    else if ((abs_error_px >= T4_BALL_FAST_ERROR_PX) ||
-             (abs_velocity_px_s >= T4_BALL_FAST_VELOCITY_PX_S) ||
+    else if ((abs_error_px >= fast_error_threshold_px) ||
+             (abs_velocity_px_s >= fast_velocity_threshold_px_s) ||
              s_t4_ball_status.dynamic_motion)
     {
         s_t4_ball_status.mode = TASK4_MAIN_BALL_MODE_DAMP;
@@ -1052,6 +1270,12 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
     desired_pulse_us = T4_BALL_SERVO_CENTER_US + desired_delta_us;
 
     s_t4_ball_status.control_delta_us = desired_delta_us;
+    if (cross_brake_active && (s_t4_ball_cross_brake_frames > 0U))
+    {
+        s_t4_ball_cross_brake_frames--;
+    }
+    s_t4_ball_status.cross_brake_frames =
+        s_t4_ball_cross_brake_frames;
     return T4Ball_WritePulse(desired_pulse_us, maximum_step_us);
 }
 

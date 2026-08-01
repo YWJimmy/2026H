@@ -98,9 +98,11 @@ need('Core/Src/main.c', 'T4_BALL_CAPTURE_MIN_MM                    ((int32_t)-12
 need('Core/Src/main.c', 'T4_BALL_CAPTURE_MAX_MM                    ((int32_t)125)', 'Task6 +12.5cm')
 need('User/action/task6_lap_target.c', '(now_ms - s_start_ms) > TASK6_LAP_TIMEOUT_MS', 'Task6 inclusive 30s')
 need('Core/Src/main.c', 'T4_BALL_TARGET_SCHEDULE_FULL_MM             ((int32_t)60)', 'Task6 -6cm full scheduling')
-need('Core/Src/main.c', 'T4_BALL_OFFCENTER_VELOCITY_SCALE_MILLI      ((int32_t)1500)', 'Task6 off-center damping')
-need('Core/Src/main.c', 'T4_BALL_OFFCENTER_POSITION_SCALE_MILLI      ((int32_t)720)', 'Task6 off-center position scale')
-need('User/action/task6_lap_target.c', 'T6GAIN,SCH=%ld,PG=%ld,VG=%ld,PRED=%ld,DB=%ld', 'Task6 gain diagnostics')
+need('Core/Src/main.c', 'T4_BALL_OFFCENTER_VELOCITY_SCALE_MILLI      ((int32_t)1650)', 'Task6 off-center damping')
+need('Core/Src/main.c', 'T4_BALL_OFFCENTER_POSITION_SCALE_MILLI      ((int32_t)650)', 'Task6 off-center position scale')
+need('User/action/task6_lap_target.c', 'T6GAIN,SCH=%ld,XSCH=%ld,PG=%ld,VG=%ld,PRED=%ld,DB=%ld,', 'Task6 gain diagnostics')
+need('Core/Src/main.c', 'T4_BALL_EXTREME_SCHEDULE_FULL_MM', 'Task6 extreme target schedule')
+need('Core/Src/main.c', 'T4_BALL_CROSS_BRAKE_FRAMES', 'Task6 crossing brake')
 
 # Reset / safe stop must end at 1650 with PWM enabled.
 need('Core/Inc/project_servo_level.h', 'PROJECT_SERVO_HORIZONTAL_US ((uint16_t)1650U)', '1650 level')

@@ -72,6 +72,7 @@ for token, label in [
     ("TASK2_PREDECEL_DISTANCE_MM             ((uint32_t)5600U)", "Task2 5.6 m gate"),
     ("TASK2_PREDECEL_CENTER_SPEED_MM_S       ((int32_t)260)", "Task2 search speed"),
     ("TASK2_RUN_TIMEOUT_MS                   ((uint32_t)20000U)", "Task2 timeout unchanged"),
+    ("((uint32_t)100U)", "Task2 100 mm final approach"),
 ]:
     require(t2_cfg, token, label)
 
@@ -88,6 +89,10 @@ for token, label in [
     ("T4_BALL_OFFCENTER_RAW_VEL_SCALE_MILLI", "raw velocity scale"),
     ("T4_BALL_OFFCENTER_PREDICT_SCALE_MILLI", "prediction scale"),
     ("T4_BALL_OFFCENTER_SLEW_SCALE_MILLI", "slew scale"),
+    ("T4_BALL_EXTREME_SCHEDULE_START_MM", "extreme schedule start"),
+    ("T4_BALL_EXTREME_SCHEDULE_FULL_MM", "extreme schedule full"),
+    ("T4_BALL_CROSS_BRAKE_FRAMES", "crossing brake"),
+    ("T4Ball_ExtremeScheduleMilli", "extreme schedule helper"),
     ("T4Ball_TargetScheduleMilli", "schedule helper"),
     ("T4Ball_ScheduledSlew", "scheduled slew helper"),
 ]:
@@ -95,13 +100,17 @@ for token, label in [
 
 for token in (
     "target_schedule_milli",
+    "extreme_schedule_milli",
     "position_gain_milli",
     "velocity_gain_milli",
     "prediction_horizon_ms",
     "position_deadband_px",
+    "fast_error_threshold_px",
+    "recover_error_threshold_px",
+    "cross_brake_frames",
 ):
     require(ball_hdr, token, f"Task6 diagnostic {token}")
-require(t6_src, '"T6GAIN,SCH=%ld,PG=%ld,VG=%ld,PRED=%ld,DB=%ld', "Task6 serial diagnostics")
+require(t6_src, '"T6GAIN,SCH=%ld,XSCH=%ld,PG=%ld,VG=%ld,PRED=%ld,DB=%ld,', "Task6 serial diagnostics")
 
 start_mm = macro_i32(main_src, "T4_BALL_TARGET_SCHEDULE_START_MM")
 full_mm = macro_i32(main_src, "T4_BALL_TARGET_SCHEDULE_FULL_MM")
@@ -169,18 +178,18 @@ far_profile = {
     "slew_recover": c_round_mul_div(100, scheduled(1000, recover_slew_scale, far_schedule), 1000),
 }
 expected_far = {
-    "position_scale": 720,
-    "velocity_normal": 600,
-    "velocity_dynamic": 750,
-    "raw_velocity": 60,
-    "predict_normal": 72,
-    "predict_dynamic": 104,
-    "deadband": 5,
-    "bias_divider": 6,
-    "slew_hold": 17,
-    "slew_normal": 24,
-    "slew_fast": 43,
-    "slew_recover": 85,
+    "position_scale": 650,
+    "velocity_normal": 660,
+    "velocity_dynamic": 825,
+    "raw_velocity": 50,
+    "predict_normal": 63,
+    "predict_dynamic": 91,
+    "deadband": 6,
+    "bias_divider": 7,
+    "slew_hold": 14,
+    "slew_normal": 20,
+    "slew_fast": 37,
+    "slew_recover": 75,
 }
 if far_profile != expected_far:
     errors.append(f"-60 mm profile mismatch: {far_profile}")
@@ -195,6 +204,7 @@ print("TASK2/TASK6 OPTIMIZATION VALIDATION PASS")
 print("OK: Task2 cruise 390/320 mm/s, search gate 5.6 m, search speed 260 mm/s")
 print("OK: Task2 20 s timeout and >=3 black-channel stop-line rule retained")
 print("OK: 0 mm target preserves the original Task4/5 controller profile")
-print("OK: -60 mm target selects full Task6 damping profile")
+print("OK: -60 mm target selects the refined off-center profile")
+print("OK: 60~110 mm has a second continuous far-end schedule and crossing brake")
 print("PROFILE 0mm :", center_profile)
 print("PROFILE -60mm:", far_profile)
