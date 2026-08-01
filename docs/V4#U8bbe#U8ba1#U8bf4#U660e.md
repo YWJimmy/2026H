@@ -1,0 +1,122 @@
+# V4限跃度速度规划设计说明
+
+## 1. 改造目标
+
+旧版线性斜坡只限制速度变化率，加速度会从0瞬间跳到固定值。旧版还把左右轮目标拆成前进分量和转向分量分别斜坡；在差速停车时，转向分量回零可能快于前进分量下降，导致低速轮先加速。
+
+V4解决：
+
+- 限制速度、加速度和跃度；
+- 启动和收速形成S曲线；
+- 正常驱动直接规划左右轮，不产生合成反向；
+- SOFT/FAST停车同比例缩放两轮；
+- 换向先停车再反向；
+- 目标精确吸附，确保`A=0`。
+
+## 2. 固定点实现
+
+规划周期为5 ms，内部采用Q16：
+
+```text
+速度：mm/s × 65536
+加速度：mm/s² × 65536
+```
+
+积分、比例缩放和制动裕量计算使用64位中间量，不使用浮点和动态内存。
+
+单轴更新顺序：
+
+```text
+速度误差
+→ 选择加速或减速约束
+→ 根据当前加速度计算提前卸载裕量
+→ 按跃度限制改变加速度
+→ 用平均加速度积分速度
+→ 越过/进入容差时精确吸附目标
+```
+
+## 3. DRIVE模式
+
+V4直接保存左右轮规划轴：
+
+```text
+left_axis.speed / left_axis.acceleration
+right_axis.speed / right_axis.acceleration
+```
+
+每周期根据左右轮误差计算：
+
+```text
+forward_error = (left_error + right_error) / 2
+turn_error    = (left_error - right_error) / 2
+```
+
+当`|turn_error|`明显大于`|forward_error|`时，说明主要是差速转向变化，采用较快的转向加速度和跃度；否则采用较慢的正常前进参数。
+
+这比前进/转向轴分别规划更稳健：
+
+- `0 → 500/120`时两轮均保持非负；
+- `500/120 → 120/500`时左右轮平滑交叉变化；
+- 高频巡线命令更新不会重置当前速度和加速度状态。
+
+## 4. SOFT与FAST停车
+
+进入停车时记录：
+
+```text
+stop_start_left
+stop_start_right
+reference = max(abs(left), abs(right))
+```
+
+只对公共`reference`生成到0的S曲线，然后按相同比例缩放左右轮：
+
+```text
+left  = stop_start_left  × reference_current / reference_start
+right = stop_start_right × reference_current / reference_start
+```
+
+由此保证：
+
+- 两轮速度幅值只减不增；
+- 差速比例基本保持；
+- 停车过程中不会额外改变转弯趋势。
+
+SOFT用于普通`0/0`命令；FAST用于KEY0普通停止。
+
+## 5. REV换向
+
+任一轮的目标方向与当前RMP方向冲突时，进入`REV`：
+
+```text
+当前RMP
+→ 同比例减速到0
+→ 切换到DRIVE
+→ 向新方向S曲线加速
+```
+
+不会带PWM直接切换电机方向。
+
+## 6. EMG急停
+
+以下情况继续调用`Chassis_Stop()`：
+
+- 编码器样本异常；
+- 调度严重超时；
+- UART巡线数据无效；
+- 丢线或全黑超过安全时间；
+- 停车过程中再次按KEY0。
+
+急停立即清除规划器、PI和PWM，并由BSP执行短路刹车。急停状态锁存，必须重新`Chassis_Enable(true)`后才能接受速度命令。
+
+## 7. 完全停车判定
+
+规划器RMP到0后，还要满足：
+
+```text
+abs(MEA_L) <= 15 mm/s
+abs(MEA_R) <= 15 mm/s
+连续保持 >= 50 ms
+```
+
+才设置`motion_stopped=true`，供测试和上层状态机判断。
