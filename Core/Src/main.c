@@ -178,7 +178,9 @@
  * up/down servo reversal that otherwise sustains a limit-cycle oscillation.
  */
 #define T4_BALL_CROSS_BRAKE_FRAMES                  ((uint8_t)3U)
-#define T4_BALL_CROSS_BRAKE_MAX_ERROR_PX            ((int32_t)58)
+#define T4_BALL_CROSS_BRAKE_MAX_ERROR_MM            T4_BALL_ONE_CM_MM
+#define T4_BALL_CROSS_MIN_VELOCITY_PX_S             ((int32_t)40)
+#define T4_BALL_CROSS_MAX_FRAME_DELTA_PX             ((int32_t)32)
 #define T4_BALL_CROSS_POSITION_SCALE_MILLI          ((int32_t)0)
 #define T4_BALL_CROSS_DAMPING_SCALE_MILLI           ((int32_t)1250)
 #define T4_BALL_CROSS_SLEW_US                       ((int32_t)8)
@@ -718,6 +720,7 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
     uint32_t vision_dt_ms = 0U;
     bool vehicle_motion_updated;
     bool cross_brake_active = false;
+    bool crossing_motion_valid = false;
 
     if (!s_t4_ball_initialized || (vision_status == 0))
     {
@@ -981,12 +984,27 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
     {
         current_error_sign = -1;
     }
+    crossing_motion_valid =
+        (vision_dt_ms >= 8U) &&
+        (vision_dt_ms <= 120U) &&
+        (T4Ball_AbsI32(frame_delta_px) <=
+         T4_BALL_CROSS_MAX_FRAME_DELTA_PX) &&
+        (T4Ball_AbsI32(raw_velocity_px_s) >=
+         T4_BALL_CROSS_MIN_VELOCITY_PX_S) &&
+        (((current_error_sign > 0) &&
+          (raw_velocity_px_s > 0) &&
+          (filtered_velocity_px_s > 0)) ||
+         ((current_error_sign < 0) &&
+          (raw_velocity_px_s < 0) &&
+          (filtered_velocity_px_s < 0)));
+
     if ((extreme_schedule_milli > 0) &&
         (current_error_sign != 0))
     {
         if ((s_t4_ball_last_error_sign != 0) &&
             (current_error_sign != s_t4_ball_last_error_sign) &&
-            (abs_error_px <= T4_BALL_CROSS_BRAKE_MAX_ERROR_PX))
+            (abs_error_mm <= T4_BALL_CROSS_BRAKE_MAX_ERROR_MM) &&
+            crossing_motion_valid)
         {
             s_t4_ball_cross_brake_frames =
                 T4_BALL_CROSS_BRAKE_FRAMES;
@@ -999,12 +1017,13 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
         s_t4_ball_cross_brake_frames = 0U;
     }
     if ((s_t4_ball_cross_brake_frames > 0U) &&
-        (abs_error_px <= T4_BALL_CROSS_BRAKE_MAX_ERROR_PX) &&
-        (extreme_schedule_milli > 0))
+        (abs_error_mm <= T4_BALL_CROSS_BRAKE_MAX_ERROR_MM) &&
+        (extreme_schedule_milli > 0) &&
+        crossing_motion_valid)
     {
         cross_brake_active = true;
     }
-    else if (abs_error_px > T4_BALL_CROSS_BRAKE_MAX_ERROR_PX)
+    else
     {
         s_t4_ball_cross_brake_frames = 0U;
     }
@@ -1225,7 +1244,8 @@ bool Task4MainBall_Update(const VisionStatus_t *vision_status)
             T4_BALL_CROSS_SLEW_US,
             extreme_schedule_milli);
     }
-    else if ((abs_error_px >= recover_error_threshold_px) ||
+    else if ((abs_error_mm > T4_BALL_ONE_CM_MM) ||
+             (abs_error_px >= recover_error_threshold_px) ||
              (abs_velocity_px_s >= recover_velocity_threshold_px_s) ||
              (T4Ball_AbsI32(raw_velocity_px_s) >=
               recover_velocity_threshold_px_s))

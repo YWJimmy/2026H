@@ -103,6 +103,12 @@ need('Core/Src/main.c', 'T4_BALL_OFFCENTER_POSITION_SCALE_MILLI      ((int32_t)6
 need('User/action/task6_lap_target.c', 'T6GAIN,SCH=%ld,XSCH=%ld,PG=%ld,VG=%ld,PRED=%ld,DB=%ld,', 'Task6 gain diagnostics')
 need('Core/Src/main.c', 'T4_BALL_EXTREME_SCHEDULE_FULL_MM', 'Task6 extreme target schedule')
 need('Core/Src/main.c', 'T4_BALL_CROSS_BRAKE_FRAMES', 'Task6 crossing brake')
+need('Core/Src/main.c', 'T4_BALL_CROSS_BRAKE_MAX_ERROR_MM', 'Task6 physical crossing boundary')
+need('Core/Src/main.c', 'T4_BALL_CROSS_MIN_VELOCITY_PX_S', 'Task6 crossing velocity gate')
+need('Core/Src/main.c', 'T4_BALL_CROSS_MAX_FRAME_DELTA_PX', 'Task6 vision jump gate')
+need('Core/Src/main.c', '(abs_error_mm > T4_BALL_ONE_CM_MM) ||', 'Task6 out-of-band recovery')
+if 'T4_BALL_CROSS_BRAKE_MAX_ERROR_PX' in text('Core/Src/main.c'):
+    errors.append('Task6 crossing brake still uses fixed pixel tolerance')
 
 # Reset / safe stop must end at 1650 with PWM enabled.
 need('Core/Inc/project_servo_level.h', 'PROJECT_SERVO_HORIZONTAL_US ((uint16_t)1650U)', '1650 level')
